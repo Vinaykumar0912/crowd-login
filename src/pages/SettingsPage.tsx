@@ -151,19 +151,6 @@ export const SettingsPage: React.FC = () => {
                 className="rounded bg-slate-950 border-slate-800 text-cyan-600 focus:ring-cyan-500 w-4 h-4"
               />
             </label>
-
-            <label className="flex items-center justify-between cursor-pointer p-3 rounded-xl bg-slate-950/60 border border-slate-900">
-              <div className="space-y-0.5">
-                <span className="font-semibold text-slate-300 block">FCA High-Confidence Prioritization</span>
-                <span className="text-[10px] text-slate-500 block leading-normal font-mono">Automatically elevate priority of Galois concept recommendations for operator review (operator retains approval authority)</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.fcaAutoRecommendation}
-                onChange={() => updateSettings({ fcaAutoRecommendation: !settings.fcaAutoRecommendation })}
-                className="rounded bg-slate-950 border-slate-800 text-cyan-600 focus:ring-cyan-500 w-4 h-4"
-              />
-            </label>
           </GlassCard>
         </div>
       </div>

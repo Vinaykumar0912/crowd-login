@@ -1,27 +1,35 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Shield, Eye, EyeOff, Radio, Lock, Mail } from 'lucide-react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { Shield, Eye, EyeOff, Radio, Lock, Mail, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { useCrowdSystem } from '../context/CrowdSystemContext';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useCrowdSystem();
-  const [email, setEmail] = useState('surveillance.ops@smartcity.gov');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Success message passed from registration page or other redirects
+  const successMsg = location.state?.message;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
     try {
-      await login({ email, password });
-      navigate('/officer-control');
+      const statusData = await login({ email, password });
+      if (statusData && statusData.next_route) {
+        navigate(statusData.next_route, { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Authentication failed. Please check credentials.');
     } finally {
@@ -67,10 +75,18 @@ export const Login: React.FC = () => {
               AI-Based Real-Time Crowd Management & Safety System
             </h1>
             <p className="text-[10px] text-cyan-400/90 max-w-[340px] mx-auto leading-normal">
-              Computer Vision · Formal Concept Analysis (FCA) · Decision Support
+              Real-Time Computer Vision · Predictive Analytics · Decision Support
             </p>
           </div>
         </div>
+
+        {/* Success message banner */}
+        {successMsg && !errorMsg && (
+          <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 text-xs flex items-center gap-2 font-medium">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
 
         {/* Error message banner */}
         {errorMsg && (
@@ -162,6 +178,19 @@ export const Login: React.FC = () => {
             )}
           </button>
         </form>
+
+        {/* Register Account Navigation */}
+        <div className="text-center pt-2">
+          <p className="text-xs text-slate-400">
+            Don't have an operator account?{' '}
+            <Link
+              to="/register"
+              className="text-cyan-400 hover:text-cyan-300 font-semibold hover:underline transition-colors"
+            >
+              Register New Account
+            </Link>
+          </p>
+        </div>
 
         <div className="pt-2 text-center border-t border-slate-900">
           <span className="text-[9px] text-slate-500 uppercase tracking-widest font-mono">

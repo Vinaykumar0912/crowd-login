@@ -7,50 +7,114 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.database import get_db
-from app.models import CameraModel
+from app.models import CameraModel, EventModel, User
 from app.schemas import CameraCreate, CameraUpdate, CameraResponse
 from app.ai.stream_processor import stream_manager
+from app.auth_utils import decode_access_token
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
+security = HTTPBearer(auto_error=False)
+
+def get_current_user_from_auth(auth: Optional[HTTPAuthorizationCredentials], db: Session) -> Optional[User]:
+    if not auth or not auth.credentials:
+        return None
+    try:
+        payload = decode_access_token(auth.credentials)
+        if payload and payload.get("sub"):
+            return db.query(User).filter(User.email == payload["sub"]).first()
+    except Exception:
+        pass
+    return None
 
 UPLOAD_VIDEOS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "videos")
 os.makedirs(UPLOAD_VIDEOS_DIR, exist_ok=True)
 
 def _ensure_default_cameras(db: Session):
-    if db.query(CameraModel).count() == 0:
-        default_cams = [
-            CameraModel(id="cam-01", name="CAM-01 - North Gate", rtsp_url="rtsp://arena.internal/cam01", location="North Gate", zone_id="zone-evt-arena-01-1", event_id="evt-arena-01", status="ready", enabled=False, playback_status="ready", resolution="1920x1080", fps=30, last_active="Ready for analysis", capacity=500, count=0, density=0.0, risk="low", health="green", source_type="rtsp", source_fps=30.0, processing_fps=30.0),
-            CameraModel(id="cam-02", name="CAM-02 - West Entry", rtsp_url="rtsp://arena.internal/cam02", location="West Entry", zone_id="zone-evt-arena-01-1", event_id="evt-arena-01", status="ready", enabled=False, playback_status="ready", resolution="1920x1080", fps=30, last_active="Ready for analysis", capacity=500, count=0, density=0.0, risk="low", health="green", source_type="rtsp", source_fps=30.0, processing_fps=30.0),
-            CameraModel(id="cam-03", name="CAM-03 - Main Arena", rtsp_url="rtsp://arena.internal/cam03", location="Main Arena", zone_id="zone-evt-arena-01-2", event_id="evt-arena-01", status="ready", enabled=False, playback_status="ready", resolution="1920x1080", fps=30, last_active="Ready for analysis", capacity=1500, count=0, density=0.0, risk="low", health="green", source_type="rtsp", source_fps=30.0, processing_fps=30.0),
-            CameraModel(id="cam-04", name="CAM-04 - South Emergency Exit", rtsp_url="rtsp://arena.internal/cam04", location="South Emergency Exit", zone_id="zone-evt-arena-01-3", event_id="evt-arena-01", status="ready", enabled=False, playback_status="ready", resolution="1920x1080", fps=30, last_active="Ready for analysis", capacity=400, count=0, density=0.0, risk="low", health="green", source_type="rtsp", source_fps=30.0, processing_fps=30.0),
-            CameraModel(id="cam-05", name="CAM-05 - Backstage", rtsp_url="rtsp://arena.internal/cam05", location="Backstage", zone_id="zone-evt-arena-01-4", event_id="evt-arena-01", status="ready", enabled=False, playback_status="ready", resolution="1920x1080", fps=30, last_active="Ready for analysis", capacity=200, count=0, density=0.0, risk="low", health="green", source_type="rtsp", source_fps=30.0, processing_fps=30.0),
-            CameraModel(id="cam-06", name="CAM-06 - East Entry", rtsp_url="rtsp://arena.internal/cam06", location="East Entry", zone_id="zone-evt-arena-01-1", event_id="evt-arena-01", status="ready", enabled=False, playback_status="ready", resolution="1920x1080", fps=30, last_active="Ready for analysis", capacity=500, count=0, density=0.0, risk="low", health="green", source_type="rtsp", source_fps=30.0, processing_fps=30.0),
-        ]
-        db.add_all(default_cams)
-        db.commit()
+    """No-op: Cameras have been reset. Cameras are registered through the camera setup workflow."""
+    pass
 
 @router.get("", response_model=List[CameraResponse])
-def get_cameras(event_id: Optional[str] = None, db: Session = Depends(get_db)):
+def get_cameras(
+    event_id: Optional[str] = None,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Fetch camera records directly from database, optionally filtered by event_id."""
     _ensure_default_cameras(db)
+    user = get_current_user_from_auth(auth, db)
+    target_event_id = event_id
+    if user and event_id:
+        evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot read cameras for an event owned by another account."
+            )
+    elif not target_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            target_event_id = evt.id
+        else:
+            return []
+
     query = db.query(CameraModel)
-    if event_id:
-        query = query.filter(CameraModel.event_id == event_id)
+    if target_event_id:
+        query = query.filter(CameraModel.event_id == target_event_id)
     return query.all()
 
+@router.get("/get/{cam_id}", response_model=CameraResponse)
+@router.get("/{cam_id}", response_model=CameraResponse)
+def get_single_camera(
+    cam_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Fetch single camera by ID with authorization verification."""
+    cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot access a camera belonging to another account's event."
+            )
+    return cam
+
 @router.post("", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
-def create_camera(cam: CameraCreate, db: Session = Depends(get_db)):
+def create_camera(
+    cam: CameraCreate,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Register new IP/RTSP camera record in READY status (Requires user to click ANALYZE)."""
     cam_id = f"cam-{int(time.time() * 1000)}"
-    
+    user = get_current_user_from_auth(auth, db)
+    assigned_event_id = cam.event_id
+    if not assigned_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            assigned_event_id = evt.id
+
+    if assigned_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.id == assigned_event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot register a camera for an event owned by another account."
+            )
+
     db_cam = CameraModel(
         id=cam_id,
         name=cam.name,
         rtsp_url=cam.rtsp_url,
         location=cam.location,
         zone_id=cam.zone_id,
-        event_id=cam.event_id,
+        event_id=assigned_event_id,
         status="ready",
         enabled=False,
         resolution=cam.resolution or "1920x1080",
@@ -80,18 +144,33 @@ def add_webcam_camera(
     capacity: Optional[int] = Form(100),
     zone_id: Optional[str] = Form(None),
     event_id: Optional[str] = Form(None),
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
 ):
     """Register PC/Laptop Live Webcam in READY status."""
     cam_id = f"cam-webcam-{int(time.time() * 1000)}"
-    
+    user = get_current_user_from_auth(auth, db)
+    assigned_event_id = event_id
+    if not assigned_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            assigned_event_id = evt.id
+
+    if assigned_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.id == assigned_event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot register a camera for an event owned by another account."
+            )
+
     db_cam = CameraModel(
         id=cam_id,
         name=name,
         rtsp_url="0",
         location=location,
         zone_id=zone_id,
-        event_id=event_id,
+        event_id=assigned_event_id,
         status="ready",
         enabled=False,
         resolution="1280x720",
@@ -122,14 +201,30 @@ async def upload_video_camera(
     capacity: Optional[int] = Form(200),
     zone_id: Optional[str] = Form(None),
     event_id: Optional[str] = Form(None),
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
 ):
     """Upload CCTV video file (MP4, AVI, MOV, MKV) and create virtual camera record in READY status."""
     cam_id = f"cam-vid-{int(time.time() * 1000)}"
     ext = os.path.splitext(file.filename)[1].lower()
-    
+
     if ext not in [".mp4", ".avi", ".mov", ".mkv"]:
         raise HTTPException(status_code=400, detail="Unsupported video format. Allowed: MP4, AVI, MOV, MKV")
+
+    user = get_current_user_from_auth(auth, db)
+    assigned_event_id = event_id
+    if not assigned_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            assigned_event_id = evt.id
+
+    if assigned_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.id == assigned_event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot upload a video for an event owned by another account."
+            )
 
     filename = f"{cam_id}{ext}"
     file_path = os.path.join(UPLOAD_VIDEOS_DIR, filename)
@@ -145,7 +240,7 @@ async def upload_video_camera(
         rtsp_url=file_path,
         location=location,
         zone_id=zone_id,
-        event_id=event_id,
+        event_id=assigned_event_id,
         status="ready",
         enabled=False,
         resolution="1920x1080",
@@ -169,11 +264,24 @@ async def upload_video_camera(
     return db_cam
 
 @router.get("/{cam_id}/stream")
-def stream_camera_video(cam_id: str, db: Session = Depends(get_db)):
+def stream_camera_video(
+    cam_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Live MJPEG video stream displaying actual CCTV frames with real-time YOLO person detection and tracking overlays."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot view stream for a camera belonging to another account's event."
+            )
 
     worker = stream_manager.workers.get(cam_id)
     if not worker:
@@ -198,11 +306,24 @@ def stream_camera_video(cam_id: str, db: Session = Depends(get_db)):
     return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 @router.post("/{cam_id}/analyze", response_model=CameraResponse)
-def analyze_camera(cam_id: str, db: Session = Depends(get_db)):
+def analyze_camera(
+    cam_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Explicitly start AI analysis pipeline for camera."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot analyze a camera belonging to another account's event."
+            )
 
     cam.playback_status = "analyzing"
     cam.status = "online"
@@ -221,11 +342,25 @@ def analyze_camera(cam_id: str, db: Session = Depends(get_db)):
     return cam
 
 @router.put("/{cam_id}/playback", response_model=CameraResponse)
-def control_camera_playback(cam_id: str, action: str, db: Session = Depends(get_db)):
+def control_camera_playback(
+    cam_id: str,
+    action: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Control camera/video playback (analyze, play, pause, stop, restart)."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot control a camera belonging to another account's event."
+            )
 
     worker = stream_manager.workers.get(cam_id)
 
@@ -265,11 +400,25 @@ def control_camera_playback(cam_id: str, action: str, db: Session = Depends(get_
     return cam
 
 @router.put("/{cam_id}", response_model=CameraResponse)
-def update_camera(cam_id: str, cam_data: CameraUpdate, db: Session = Depends(get_db)):
+def update_camera(
+    cam_id: str,
+    cam_data: CameraUpdate,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Update camera attributes in MySQL database."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot modify a camera belonging to another account's event."
+            )
 
     if cam_data.name is not None:
         cam.name = cam_data.name
@@ -297,11 +446,25 @@ def update_camera(cam_id: str, cam_data: CameraUpdate, db: Session = Depends(get
     return cam
 
 @router.put("/{cam_id}/toggle-enabled", response_model=CameraResponse)
-def toggle_camera_enabled(cam_id: str, db: Session = Depends(get_db)):
+def toggle_camera_enabled(
+    cam_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Toggle enabled status in MySQL database."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot modify a camera belonging to another account's event."
+            )
+
     cam.enabled = not cam.enabled
     if not cam.enabled and stream_manager.workers.get(cam_id):
         stream_manager.stop_worker(cam_id)
@@ -311,22 +474,50 @@ def toggle_camera_enabled(cam_id: str, db: Session = Depends(get_db)):
     return cam
 
 @router.put("/{cam_id}/toggle-status", response_model=CameraResponse)
-def toggle_camera_status(cam_id: str, db: Session = Depends(get_db)):
+def toggle_camera_status(
+    cam_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Toggle online/offline status in MySQL database."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot modify a camera belonging to another account's event."
+            )
+
     cam.status = "offline" if cam.status == "online" else "online"
     db.commit()
     db.refresh(cam)
     return cam
 
 @router.delete("/{cam_id}")
-def delete_camera(cam_id: str, db: Session = Depends(get_db)):
+def delete_camera(
+    cam_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Delete camera row from MySQL database."""
     cam = db.query(CameraModel).filter(CameraModel.id == cam_id).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and cam.event_id:
+        evt = db.query(EventModel).filter(EventModel.id == cam.event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot delete a camera belonging to another account's event."
+            )
+
     stream_manager.stop_worker(cam_id)
     db.delete(cam)
     db.commit()

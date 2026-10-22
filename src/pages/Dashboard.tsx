@@ -187,7 +187,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       {/* Grid of Real Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Analyzing Feeds"
           value={analyzingCams.length > 0 ? `${analyzingCams.length} / ${totalCams}` : "No active video source"}
@@ -201,13 +201,6 @@ export const Dashboard: React.FC = () => {
           icon={Users}
           glowColor={analyzingCams.length > 0 ? "cyan" : "blue"}
           subtext={analyzingCams.length > 0 ? `Aggregated across ${analyzingCams.length} feeds (overlap estimated)` : '0 detections'}
-        />
-        <StatCard
-          title="Active Emergencies"
-          value={activeEmergenciesCount}
-          icon={Siren}
-          glowColor={activeEmergenciesCount > 0 ? 'red' : 'green'}
-          subtext={activeEmergenciesCount > 0 ? 'Action required in MySQL' : 'No active emergency'}
         />
         <StatCard
           title="Capacity Occupancy"
@@ -341,63 +334,6 @@ export const Dashboard: React.FC = () => {
                 <p className="text-[10px] text-slate-600">0 detections · Select or connect a camera stream in Camera Access.</p>
               </div>
             )}
-          </div>
-
-          {/* Monitored Zone Safety Status */}
-          <div className="cyber-glass p-5 rounded-xl border border-blue-500/10 space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-900/60">
-              <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-200">
-                  Monitored Zone Safety & Flow Overview
-                </h3>
-                <span className="text-[10px] text-slate-500">Live multi-sensor zone occupancy and risk ratings</span>
-              </div>
-              <button
-                onClick={() => navigate('/venue-architecture')}
-                className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 uppercase tracking-wider"
-              >
-                Configure Zones →
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {zones.map((zone) => {
-                const zoneDens = Math.min(100, Math.round(zone.density || (zone.capacity ? (zone.current_count / zone.capacity) * 100 : 0)));
-                const riskColor = 
-                  zone.risk_level === 'critical' ? 'text-red-400 bg-red-950/30 border-red-500/30' :
-                  zone.risk_level === 'high' ? 'text-orange-400 bg-orange-950/30 border-orange-500/30' :
-                  zone.risk_level === 'medium' ? 'text-amber-400 bg-amber-950/30 border-amber-500/30' :
-                  'text-green-400 bg-green-950/30 border-green-500/30';
-
-                return (
-                  <div key={zone.id} className="p-3 bg-slate-950/60 rounded-xl border border-slate-900 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="text-xs font-bold text-white tracking-wide">{zone.name}</h4>
-                        <span className="text-[9px] text-slate-500 font-mono">{zone.code} · {zone.zone_type}</span>
-                      </div>
-                      <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${riskColor}`}>
-                        {zone.risk_level}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span>Occupancy: <strong className="text-white">{zone.current_count}</strong> / {zone.capacity}</span>
-                      <span className="font-mono">{zoneDens}%</span>
-                    </div>
-
-                    <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 rounded-full ${
-                          zoneDens > 80 ? 'bg-red-500' : zoneDens > 50 ? 'bg-amber-500' : 'bg-cyan-500'
-                        }`}
-                        style={{ width: `${Math.max(4, zoneDens)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </div>
 

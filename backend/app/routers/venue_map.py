@@ -2,11 +2,12 @@ import os
 import time
 import shutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.database import get_db
-from app.models import EventModel, VenuePinModel, ZoneModel, CameraModel, SecurityStaffModel
+from app.models import EventModel, VenuePinModel, ZoneModel, CameraModel, SecurityStaffModel, User
 from app.schemas import (
     VenueDetailsResponse, 
     VenuePinCreate, 
@@ -15,8 +16,21 @@ from app.schemas import (
     ZoneUpdate,
     ZoneResponse
 )
+from app.auth_utils import decode_access_token
 
 router = APIRouter(prefix="/events", tags=["Venue Map & Architecture"])
+security = HTTPBearer(auto_error=False)
+
+def get_current_user_from_auth(auth: Optional[HTTPAuthorizationCredentials], db: Session) -> Optional[User]:
+    if not auth or not auth.credentials:
+        return None
+    try:
+        payload = decode_access_token(auth.credentials)
+        if payload and payload.get("sub"):
+            return db.query(User).filter(User.email == payload["sub"]).first()
+    except Exception:
+        pass
+    return None
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "maps")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -99,16 +113,8 @@ def _ensure_default_pins(event_id: str, db: Session):
         db.commit()
 
 def _ensure_default_staff(db: Session):
-    existing = db.query(SecurityStaffModel).count()
-    if existing == 0:
-        staff_members = [
-            SecurityStaffModel(id="staff-01", name="Commander R. Vance", zone="Command Desk", is_online=True, phone="+1-555-0101", status="idle"),
-            SecurityStaffModel(id="staff-02", name="Officer S. Chen", zone="Zone A - Entry Concourse", is_online=True, phone="+1-555-0102", status="idle"),
-            SecurityStaffModel(id="staff-03", name="Officer M. Patel", zone="Zone B - Main Arena", is_online=True, phone="+1-555-0103", status="idle"),
-            SecurityStaffModel(id="staff-04", name="Officer T. Brooks", zone="Zone C - Emergency Exit", is_online=True, phone="+1-555-0104", status="idle"),
-        ]
-        db.add_all(staff_members)
-        db.commit()
+    """No-op: Security staff records have been reset."""
+    pass
 
 def _build_venue_response(evt: EventModel, db: Session) -> dict:
     _ensure_default_zones(evt.id, db)
@@ -172,7 +178,11 @@ def _build_venue_response(evt: EventModel, db: Session) -> dict:
 # Provide both /venue-details AND /venue to resolve frontend/backend route mismatch
 @router.get("/{event_id}/venue-details", response_model=VenueDetailsResponse)
 @router.get("/{event_id}/venue", response_model=VenueDetailsResponse)
-def get_venue_details(event_id: str, db: Session = Depends(get_db)):
+def get_venue_details(
+    event_id: str, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     if event_id == "default":
         evt = db.query(EventModel).first()
     else:
@@ -181,15 +191,34 @@ def get_venue_details(event_id: str, db: Session = Depends(get_db)):
     if not evt:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot read venue details for an event owned by another account."
+        )
+
     return _build_venue_response(evt, db)
 
 # Provide both /map AND /venue-map
 @router.post("/{event_id}/map", response_model=VenueDetailsResponse)
 @router.post("/{event_id}/venue-map", response_model=VenueDetailsResponse)
-async def upload_venue_map(event_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_venue_map(
+    event_id: str, 
+    file: UploadFile = File(...), 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     evt = db.query(EventModel).filter(EventModel.id == event_id).first()
     if not evt:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot modify venue map for an event owned by another account."
+        )
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -209,20 +238,43 @@ async def upload_venue_map(event_id: str, file: UploadFile = File(...), db: Sess
 
 @router.delete("/{event_id}/map")
 @router.delete("/{event_id}/venue-map")
-def delete_venue_map(event_id: str, db: Session = Depends(get_db)):
+def delete_venue_map(
+    event_id: str, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     evt = db.query(EventModel).filter(EventModel.id == event_id).first()
     if not evt:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot modify venue map for an event owned by another account."
+        )
 
     evt.map_url = None
     db.commit()
     return {"message": "Venue map removed successfully", "event_id": event_id}
 
 @router.post("/{event_id}/pins", response_model=VenuePinResponse, status_code=status.HTTP_201_CREATED)
-def add_venue_pin(event_id: str, pin: VenuePinCreate, db: Session = Depends(get_db)):
+def add_venue_pin(
+    event_id: str, 
+    pin: VenuePinCreate, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     evt = db.query(EventModel).filter(EventModel.id == event_id).first()
     if not evt:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot add pins for an event owned by another account."
+        )
 
     pin_id = f"pin-{evt.id}-{int(time.time() * 1000)}"
     db_pin = VenuePinModel(
@@ -239,7 +291,21 @@ def add_venue_pin(event_id: str, pin: VenuePinCreate, db: Session = Depends(get_
     return db_pin
 
 @router.delete("/{event_id}/pins/{pin_id}")
-def delete_venue_pin(event_id: str, pin_id: str, db: Session = Depends(get_db)):
+def delete_venue_pin(
+    event_id: str, 
+    pin_id: str, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+    if evt:
+        user = get_current_user_from_auth(auth, db)
+        if user and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot delete pins for an event owned by another account."
+            )
+
     pin = db.query(VenuePinModel).filter(VenuePinModel.id == pin_id, VenuePinModel.event_id == event_id).first()
     if not pin:
         raise HTTPException(status_code=404, detail="Pin not found")
@@ -250,7 +316,11 @@ def delete_venue_pin(event_id: str, pin_id: str, db: Session = Depends(get_db)):
 
 # --- ZONE CRUD ENDPOINTS ---
 @router.get("/{event_id}/zones", response_model=List[ZoneResponse])
-def get_event_zones(event_id: str, db: Session = Depends(get_db)):
+def get_event_zones(
+    event_id: str, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     if event_id == "default":
         evt = db.query(EventModel).first()
     else:
@@ -258,14 +328,34 @@ def get_event_zones(event_id: str, db: Session = Depends(get_db)):
 
     if not evt:
         return []
+
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot read zones for an event owned by another account."
+        )
+
     _ensure_default_zones(evt.id, db)
     return db.query(ZoneModel).filter(ZoneModel.event_id == evt.id).all()
 
 @router.post("/{event_id}/zones", response_model=ZoneResponse, status_code=status.HTTP_201_CREATED)
-def create_event_zone(event_id: str, zone_data: ZoneCreate, db: Session = Depends(get_db)):
+def create_event_zone(
+    event_id: str, 
+    zone_data: ZoneCreate, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     evt = db.query(EventModel).filter(EventModel.id == event_id).first()
     if not evt:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot create zones for an event owned by another account."
+        )
 
     zone_id = f"zone-{evt.id}-{int(time.time() * 1000)}"
     new_zone = ZoneModel(
@@ -283,7 +373,22 @@ def create_event_zone(event_id: str, zone_data: ZoneCreate, db: Session = Depend
     return new_zone
 
 @router.put("/{event_id}/zones/{zone_id}", response_model=ZoneResponse)
-def update_event_zone(event_id: str, zone_id: str, zone_data: ZoneUpdate, db: Session = Depends(get_db)):
+def update_event_zone(
+    event_id: str, 
+    zone_id: str, 
+    zone_data: ZoneUpdate, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+    if evt:
+        user = get_current_user_from_auth(auth, db)
+        if user and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot modify zones for an event owned by another account."
+            )
+
     zone = db.query(ZoneModel).filter(ZoneModel.id == zone_id, ZoneModel.event_id == event_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")
@@ -304,7 +409,21 @@ def update_event_zone(event_id: str, zone_id: str, zone_data: ZoneUpdate, db: Se
     return zone
 
 @router.delete("/{event_id}/zones/{zone_id}")
-def delete_event_zone(event_id: str, zone_id: str, db: Session = Depends(get_db)):
+def delete_event_zone(
+    event_id: str, 
+    zone_id: str, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+    if evt:
+        user = get_current_user_from_auth(auth, db)
+        if user and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot delete zones for an event owned by another account."
+            )
+
     zone = db.query(ZoneModel).filter(ZoneModel.id == zone_id, ZoneModel.event_id == event_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")

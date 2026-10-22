@@ -20,11 +20,36 @@ export const apiService = {
     }
     return await res.json();
   },
+  register: async (userData: { name: string; email: string; password: string; confirm_password?: string }) => {
+    const res = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(err.detail || 'Registration failed');
+    }
+    return await res.json();
+  },
   getMe: async () => {
     const res = await fetch(`${API_BASE_URL}/auth/me`, {
       headers: { ...getAuthHeaders() }
     });
     if (!res.ok) return null;
+    return await res.json();
+  },
+  getOnboardingStatus: async (eventId?: string) => {
+    const url = eventId 
+      ? `${API_BASE_URL}/auth/onboarding-status?event_id=${encodeURIComponent(eventId)}` 
+      : `${API_BASE_URL}/auth/onboarding-status`;
+    const res = await fetch(url, {
+      headers: { ...getAuthHeaders() }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to verify onboarding status' }));
+      throw new Error(err.detail || 'Failed to verify onboarding status');
+    }
     return await res.json();
   },
 
@@ -183,35 +208,42 @@ export const apiService = {
     const res = await fetch(`${API_BASE_URL}/recommendations/${recId}/dismiss`, { method: 'POST' });
     return await res.json();
   },
-  getFCALattice: async (eventId?: string) => {
-    const url = eventId ? `${API_BASE_URL}/recommendations/fca-lattice?event_id=${eventId}` : `${API_BASE_URL}/recommendations/fca-lattice`;
-    const res = await fetch(url);
-    return await res.json();
-  },
 
   // Events
   getEvents: async () => {
-    const res = await fetch(`${API_BASE_URL}/events`);
+    const res = await fetch(`${API_BASE_URL}/events`, {
+      headers: { ...getAuthHeaders() }
+    });
     return await res.json();
   },
-  addEvent: async (evt: { title: string; venue_name?: string; capacity: number; staff?: number; risk?: string; start_time?: string; end_time?: string; limits?: number; map_url?: string }) => {
+  getMyEvent: async () => {
+    const res = await fetch(`${API_BASE_URL}/events/my-event`, {
+      headers: { ...getAuthHeaders() }
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  },
+  addEvent: async (evt: { title: string; venue_name?: string; capacity: number; staff?: number; risk?: string; start_time?: string; end_time?: string; limits?: number; map_url?: string; manager_id?: number }) => {
     const res = await fetch(`${API_BASE_URL}/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(evt)
     });
     return await res.json();
   },
-  updateEvent: async (evtId: string, evt: Partial<{ title: string; venue_name: string; capacity: number; staff: number; risk: string; start_time: string; end_time: string; limits: number; map_url: string }>) => {
+  updateEvent: async (evtId: string, evt: Partial<{ title: string; venue_name: string; capacity: number; staff: number; risk: string; start_time: string; end_time: string; limits: number; map_url: string; manager_id: number }>) => {
     const res = await fetch(`${API_BASE_URL}/events/${evtId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(evt)
     });
     return await res.json();
   },
   deleteEvent: async (evtId: string) => {
-    const res = await fetch(`${API_BASE_URL}/events/${evtId}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE_URL}/events/${evtId}`, { 
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() }
+    });
     return await res.json();
   },
 
@@ -347,54 +379,6 @@ export const apiService = {
     return await res.json();
   },
 
-  // Offline Video Analysis
-  getOfflineJobs: async () => {
-    const res = await fetch(`${API_BASE_URL}/offline-analysis/jobs`);
-    return await res.json();
-  },
-  getOfflineJob: async (jobId: string) => {
-    const res = await fetch(`${API_BASE_URL}/offline-analysis/jobs/${jobId}`);
-    return await res.json();
-  },
-  uploadOfflineVideo: async (file: File, options?: { name?: string; zone_id?: string; event_id?: string; conf_threshold?: number; sample_fps?: number }) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (options?.name) formData.append('name', options.name);
-    if (options?.zone_id) formData.append('zone_id', options.zone_id);
-    if (options?.event_id) formData.append('event_id', options.event_id);
-    if (options?.conf_threshold !== undefined) formData.append('conf_threshold', options.conf_threshold.toString());
-    if (options?.sample_fps !== undefined) formData.append('sample_fps', options.sample_fps.toString());
-
-    const res = await fetch(`${API_BASE_URL}/offline-analysis/upload`, {
-      method: 'POST',
-      body: formData
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
-      throw new Error(err.detail || 'Upload failed');
-    }
-    return await res.json();
-  },
-  cancelOfflineJob: async (jobId: string) => {
-    const res = await fetch(`${API_BASE_URL}/offline-analysis/jobs/${jobId}/cancel`, { method: 'POST' });
-    return await res.json();
-  },
-  getHardwareInfo: async () => {
-    const res = await fetch(`${API_BASE_URL}/offline-analysis/hardware-info`);
-    return await res.json();
-  },
-
-  // Heatmap Base64 (Camera, Zone, Area with transparent option)
-  getHeatmap: async (camId?: string, scope: 'camera' | 'zone' | 'area' = 'camera', transparent: boolean = false, eventId?: string) => {
-    const params = new URLSearchParams();
-    if (camId) params.append('cam_id', camId);
-    params.append('scope', scope);
-    if (transparent) params.append('transparent', 'true');
-    if (eventId) params.append('event_id', eventId);
-    const res = await fetch(`${API_BASE_URL}/heatmap?${params.toString()}`);
-    return await res.json();
-  },
-
   // Reports Summary
   getReports: async (eventId?: string) => {
     const url = eventId ? `${API_BASE_URL}/reports?event_id=${eventId}` : `${API_BASE_URL}/reports`;
@@ -403,11 +387,10 @@ export const apiService = {
   },
 
   // Download PDF Audit Report
-  downloadPDFReport: (options?: { camId?: string; eventId?: string; includeFca?: boolean; includeCams?: boolean; includeAlerts?: boolean }) => {
+  downloadPDFReport: (options?: { camId?: string; eventId?: string; includeCams?: boolean; includeAlerts?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.camId) params.append('cam_id', options.camId);
     if (options?.eventId) params.append('event_id', options.eventId);
-    if (options?.includeFca !== undefined) params.append('include_fca', options.includeFca.toString());
     if (options?.includeCams !== undefined) params.append('include_cams', options.includeCams.toString());
     if (options?.includeAlerts !== undefined) params.append('include_alerts', options.includeAlerts.toString());
     const query = params.toString() ? `?${params.toString()}` : '';

@@ -20,7 +20,8 @@ def migrate_database():
     ]
 
     event_columns = [
-        ("venue_name", "VARCHAR(255) DEFAULT 'Main Venue Complex'")
+        ("venue_name", "VARCHAR(255) DEFAULT 'Main Venue Complex'"),
+        ("manager_id", "INTEGER NULL")
     ]
 
     analytics_columns = [
@@ -158,13 +159,15 @@ def migrate_database():
         except Exception as e:
             print(f"[MIGRATION][NOTICE] Orphaned cleanup: {e}")
 
-        # Ensure operational zones exist for Exhibition Hall event (evt-1790793930112)
+        # Ensure operational zones exist for Exhibition Hall event (evt-1790793930112) only if the event exists
         try:
             evt_id = 'evt-1790793930112'
-            zone_count = conn.execute(text(f"SELECT COUNT(*) FROM zones WHERE event_id = '{evt_id}'")).scalar()
-            if zone_count == 0:
-                print(f"[MIGRATION] Seeding operational zones for event {evt_id}...")
-                conn.execute(text(f"""
+            evt_exists = conn.execute(text(f"SELECT COUNT(*) FROM events WHERE id = '{evt_id}'")).scalar()
+            if evt_exists > 0:
+                zone_count = conn.execute(text(f"SELECT COUNT(*) FROM zones WHERE event_id = '{evt_id}'")).scalar()
+                if zone_count == 0:
+                    print(f"[MIGRATION] Seeding operational zones for event {evt_id}...")
+                    conn.execute(text(f"""
                     INSERT INTO zones (id, event_id, name, code, capacity, current_count, density, risk_level, zone_type)
                     VALUES 
                     ('zone-{evt_id}-1', '{evt_id}', 'North Main Gate', 'GATE-NORTH', 1500, 0, 0.0, 'low', 'gate_area'),
@@ -178,9 +181,9 @@ def migrate_database():
                 conn.execute(text(f"UPDATE cameras SET zone_id = 'zone-{evt_id}-3' WHERE id = 'cam-vid-1791478981459' AND (zone_id IS NULL OR zone_id = '')"))
                 conn.execute(text(f"UPDATE cameras SET zone_id = 'zone-{evt_id}-4' WHERE id = 'cam-vid-1791479021172' AND (zone_id IS NULL OR zone_id = '')"))
                 conn.commit()
-                print(f"[MIGRATION][SUCCESS] Seeded 4 operational zones for {evt_id} and mapped CCTV cameras.")
         except Exception as e:
             print(f"[MIGRATION][NOTICE] Exhibition Hall zone seeding: {e}")
+
 
     print("[MIGRATION] Database schema synchronization complete. Existing data preserved.\n")
 

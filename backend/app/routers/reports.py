@@ -197,31 +197,11 @@ def generate_pdf_report(
                 y -= 14
             y -= 10
 
-        # 5. FCA Galois Decision Recommendations (if include_fca is True)
-        if include_fca:
-            check_page_break(100)
-            recs = db.query(RecommendationModel).all()
-            p.setFont("Helvetica-Bold", 12)
-            p.drawString(50, y, f"5. Formal Concept Analysis (FCA) Galois Directives ({len(recs)} generated)")
-            y -= 16
-            p.setFont("Helvetica", 9)
-            if recs:
-                for r in recs[:6]:
-                    check_page_break(30)
-                    p.drawString(60, y, f"• [{r.priority.upper()}] ({r.status.upper()}) {r.title} (Conf: {r.confidence}%)")
-                    y -= 12
-                    p.drawString(75, y, f"Rationale: {r.reason}")
-                    y -= 14
-            else:
-                p.drawString(60, y, "• Standard operating conditions. No FCA emergency recommendations required.")
-                y -= 14
-            y -= 10
-
-        # 6. Emergency Management Log
+        # 5. Emergency Management Log
         check_page_break(80)
         emgs = db.query(EmergencyEventModel).order_by(EmergencyEventModel.created_at.desc()).limit(4).all()
         p.setFont("Helvetica-Bold", 12)
-        p.drawString(50, y, f"6. Emergency Crisis Log ({len(emgs)} incidents)")
+        p.drawString(50, y, f"5. Emergency Crisis Log ({len(emgs)} incidents)")
         y -= 16
         p.setFont("Helvetica", 9)
         if emgs:

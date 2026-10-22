@@ -5,17 +5,52 @@ from datetime import datetime
 import time
 
 from app.database import get_db
-from app.models import EmergencyEventModel, EmergencyDispatchModel, SecurityStaffModel, CameraModel, AlertModel
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.models import EmergencyEventModel, EmergencyDispatchModel, SecurityStaffModel, CameraModel, AlertModel, EventModel, User
 from app.schemas import EmergencyCreate, EmergencyResponse
+from app.auth_utils import decode_access_token
 
 router = APIRouter(prefix="/emergency", tags=["Emergency Management"])
+security = HTTPBearer(auto_error=False)
+
+def get_current_user_from_auth(auth: Optional[HTTPAuthorizationCredentials], db: Session) -> Optional[User]:
+    if not auth or not auth.credentials:
+        return None
+    try:
+        payload = decode_access_token(auth.credentials)
+        if payload and payload.get("sub"):
+            return db.query(User).filter(User.email == payload["sub"]).first()
+    except Exception:
+        pass
+    return None
 
 @router.get("/status")
-def get_current_emergency_status(event_id: Optional[str] = None, db: Session = Depends(get_db)):
+def get_current_emergency_status(
+    event_id: Optional[str] = None, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Fetch currently active emergency event & dispatches from database."""
+    user = get_current_user_from_auth(auth, db)
+    target_event_id = event_id
+
+    if user and event_id:
+        evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot read emergency status for an event owned by another account."
+            )
+    elif not target_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            target_event_id = evt.id
+        else:
+            return {"has_active_emergency": False, "active_event": None, "dispatches": []}
+
     query = db.query(EmergencyEventModel).filter(EmergencyEventModel.status != "RESOLVED")
-    if event_id:
-        cams = db.query(CameraModel).filter(CameraModel.event_id == event_id).all()
+    if target_event_id:
+        cams = db.query(CameraModel).filter(CameraModel.event_id == target_event_id).all()
         cam_ids = [c.id for c in cams]
         cam_locs = [c.location for c in cams]
         all_refs = set(cam_ids + cam_locs)

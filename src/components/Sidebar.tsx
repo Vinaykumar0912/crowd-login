@@ -6,20 +6,16 @@ import {
   LayoutDashboard, 
   Video, 
   BarChart3, 
-  Flame, 
-  Network, 
   Cpu, 
   Bell, 
   FileText, 
   Server, 
   AlertOctagon, 
   Settings, 
-  LogOut,
   Radio,
   Layers,
   PhoneCall,
-  Film,
-  Calendar
+  LogOut
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -31,18 +27,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, setCollapsed }) => 
   const { emergencyState, logout } = useCrowdSystem();
 
   const navItems = [
-    { name: 'Officer Control Panel', path: '/officer-control', icon: Sliders, highlightCyan: true },
-    { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Events & Operations', path: '/events', icon: Calendar },
+    { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, highlightCyan: true },
     { name: 'Live Monitoring', path: '/live', icon: Video },
     { name: 'Camera Access & Health', path: '/cameras', icon: Server },
+    { name: 'Officer Control Panel', path: '/officer-control', icon: Sliders },
     { name: 'Venue Architecture & Map', path: '/venue-architecture', icon: Layers },
     { name: 'Security Staff Dispatch', path: '/staff-communication', icon: PhoneCall },
-    { name: 'Manual Video Analysis', path: '/manual-analysis', icon: Film },
-    { name: 'Offline AI Mode', path: '/offline-ai', icon: Cpu },
     { name: 'Crowd Analytics', path: '/analytics', icon: BarChart3 },
-    { name: 'Heatmaps', path: '/heatmaps', icon: Flame },
-    { name: 'FCA Analysis', path: '/fca', icon: Network },
     { name: 'Decision Support', path: '/decision-support', icon: Cpu },
     { name: 'Alerts Logs', path: '/alerts', icon: Bell },
     { name: 'Emergency Panel', path: '/emergency', icon: AlertOctagon, highlightRed: true },

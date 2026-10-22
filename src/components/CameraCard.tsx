@@ -6,9 +6,10 @@ import { NavLink } from 'react-router-dom';
 
 interface CameraCardProps {
   camera: Camera;
+  onInspect?: () => void;
 }
 
-export const CameraCard: React.FC<CameraCardProps> = ({ camera }) => {
+export const CameraCard: React.FC<CameraCardProps> = ({ camera, onInspect }) => {
   const { toggleCameraStatus, removeCamera } = useCrowdSystem();
 
   const isOnline = camera.status === 'online';
@@ -46,16 +47,6 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera }) => {
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
               <span>LIVE</span>
             </div>
-
-            {/* Bounding Box Info */}
-            <div className="absolute bottom-2 left-2 flex gap-1.5 z-20">
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/80 text-cyan-400 border border-cyan-500/20 font-mono font-bold">
-                FPS: {camera.processingFps || camera.fps || 30}
-              </span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/80 text-white font-mono">
-                {camera.resolution || '1920x1080'}
-              </span>
-            </div>
           </>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 gap-2 p-4 text-center">
@@ -79,9 +70,6 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera }) => {
       <div className="p-4 space-y-3">
         <div>
           <h4 className="text-sm font-semibold truncate text-white">{camera.name}</h4>
-          <span className="text-[10px] font-mono text-slate-500 block truncate leading-tight mt-0.5">
-            {camera.rtspUrl}
-          </span>
         </div>
 
         {isAnalyzing ? (
@@ -120,13 +108,25 @@ export const CameraCard: React.FC<CameraCardProps> = ({ camera }) => {
             {isOnline ? 'Disconnect' : 'Connect RTSP'}
           </button>
           
-          <NavLink
-            to="/live"
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white transition-colors"
-            title="Inspect Stream"
-          >
-            <Eye className="w-4 h-4" />
-          </NavLink>
+          {onInspect ? (
+            <button
+              onClick={onInspect}
+              className="px-3 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-500/30 text-cyan-400 hover:text-cyan-300 text-xs font-bold transition-all flex items-center gap-1"
+              title="Inspect Selected Camera"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Inspect</span>
+            </button>
+          ) : (
+            <NavLink
+              to="/live"
+              className="px-3 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-500/30 text-cyan-400 hover:text-cyan-300 text-xs font-bold transition-all flex items-center gap-1"
+              title="Inspect Stream"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Inspect</span>
+            </NavLink>
+          )}
 
           <button
             onClick={() => removeCamera(camera.id)}

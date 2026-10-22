@@ -24,7 +24,6 @@ export const OfficerControlPanel: React.FC = () => {
     cameras, 
     events,
     selectedEventId,
-    setSelectedEventId,
     controlCameraPlayback,
     addEvent
   } = useCrowdSystem();
@@ -71,25 +70,12 @@ export const OfficerControlPanel: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Active Event Selector */}
+          {/* Active Event Display */}
           <div className="flex items-center gap-2 bg-slate-900 px-3 py-2.5 rounded-xl border border-cyan-500/30">
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">Operation:</span>
-            {events.length > 0 ? (
-              <select
-                value={selectedEventId}
-                onChange={(e) => setSelectedEventId(e.target.value)}
-                className="bg-transparent text-cyan-300 font-bold text-xs outline-none cursor-pointer max-w-[200px] truncate"
-                title="Switch Active Event / Operation"
-              >
-                {events.map((evt) => (
-                  <option key={evt.id} value={evt.id} className="bg-slate-900 text-slate-200">
-                    {evt.title}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="text-cyan-300 font-semibold text-xs">No Events</span>
-            )}
+            <span className="text-cyan-300 font-bold text-xs max-w-[200px] truncate">
+              {events.find(e => e.id === selectedEventId)?.title || (events.length > 0 ? events[0].title : 'Active Operation')}
+            </span>
           </div>
 
           <button
@@ -269,7 +255,7 @@ export const OfficerControlPanel: React.FC = () => {
               <span>AI Inference Modules Control</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Enable or disable core Computer Vision & FCA reasoning modules in real-time.
+              Enable or disable core Computer Vision detection modules in real-time.
             </p>
           </div>
           <span className="text-xs font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-500/20 px-2.5 py-1 rounded-lg">

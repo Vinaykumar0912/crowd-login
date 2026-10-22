@@ -5,8 +5,6 @@ import {
   MapPin, 
   Upload, 
   Trash2, 
-  Sliders, 
-  Flame, 
   Crosshair, 
   Layers,
   Plus,
@@ -21,15 +19,11 @@ import {
   Lock
 } from 'lucide-react';
 
-import { apiService } from '../services/api';
-
 export const VenueArchitecture: React.FC = () => {
   const { 
     venueMap, 
     events, 
     selectedEventId, 
-    setSelectedEventId, 
-    updateVenueMap, 
     uploadVenueMapFile, 
     deleteVenueMapFile, 
     addVenuePin, 
@@ -48,9 +42,6 @@ export const VenueArchitecture: React.FC = () => {
   const [newPinType, setNewPinType] = useState<VenuePin['type']>('gate_entry');
   const [newPinLabel, setNewPinLabel] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-
-  // Real AI Area Heatmap state
-  const [heatmapImage, setHeatmapImage] = useState<string | null>(null);
 
   // Zone Management State
   const [showAddZoneModal, setShowAddZoneModal] = useState(false);
@@ -74,28 +65,6 @@ export const VenueArchitecture: React.FC = () => {
   };
 
   const eventCameras = cameras.filter(c => c.eventId === selectedEventId);
-
-  // Poll real AI transparent heatmap from OpenCV MultiLevelHeatmapManager
-  React.useEffect(() => {
-    let active = true;
-    const fetchRealHeatmap = async () => {
-      try {
-        const res = await apiService.getHeatmap(undefined, 'area', true, selectedEventId);
-        if (active) {
-          setHeatmapImage(res && res.image ? res.image : null);
-        }
-      } catch (e) {
-        if (active) setHeatmapImage(null);
-      }
-    };
-
-    fetchRealHeatmap();
-    const timer = setInterval(fetchRealHeatmap, 3000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [selectedEventId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -169,27 +138,19 @@ export const VenueArchitecture: React.FC = () => {
             Venue Architecture & Map Management
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Upload custom floorplan blueprints for each event. Dynamically configure entry gates, evacuation routes, security posts, and AI spatial heatmap overlays.
+            Upload custom floorplan blueprints for your event. Dynamically configure entry gates, evacuation routes, security posts, and operational markers.
           </p>
         </div>
 
-        {/* Action Controls & Event Selector */}
+        {/* Action Controls & Active Event */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Select Active Event */}
+          {/* Active Event Display */}
           <div className="flex items-center gap-2 bg-slate-950 border border-cyber-border px-3 py-2 rounded-xl text-xs">
             <Calendar className="w-4 h-4 text-cyan-400" />
             <span className="text-slate-400 font-mono text-[10px] uppercase">Active Event:</span>
-            <select
-              value={selectedEventId}
-              onChange={(e) => setSelectedEventId(e.target.value)}
-              className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
-            >
-              {events.map(evt => (
-                <option key={evt.id} value={evt.id} className="bg-slate-950 text-white">
-                  {evt.title} ({evt.capacity} Max)
-                </option>
-              ))}
-            </select>
+            <span className="text-white font-bold max-w-[220px] truncate">
+              {currentEventObj.title}
+            </span>
           </div>
 
           {/* Upload Blueprint Button */}
@@ -224,34 +185,6 @@ export const VenueArchitecture: React.FC = () => {
         <>
           {/* Map Controls Toolbar */}
           <GlassCard className="p-4 flex flex-wrap items-center justify-between gap-4 text-xs font-mono">
-            <div className="flex items-center gap-6">
-              {/* Opacity Slider */}
-              <div className="flex items-center gap-3">
-                <Sliders className="w-4 h-4 text-cyan-400" />
-                <span className="text-slate-400 font-bold uppercase text-[10px]">Heatmap Overlay Opacity:</span>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  value={venueMap.opacity}
-                  onChange={(e) => updateVenueMap({ opacity: parseInt(e.target.value) })}
-                  className="w-32 accent-cyan-500 cursor-pointer"
-                />
-                <span className="text-cyan-400 font-bold w-8">{venueMap.opacity}%</span>
-              </div>
-
-              {/* Toggle Heatmap Layer */}
-              <label className="flex items-center gap-2 cursor-pointer border-l border-slate-800 pl-6">
-                <input 
-                  type="checkbox" 
-                  checked={venueMap.showHeatmap}
-                  onChange={(e) => updateVenueMap({ showHeatmap: e.target.checked })}
-                  className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
-                />
-                <span className="text-white font-semibold">Show AI Heatmap Layer</span>
-              </label>
-            </div>
-
             {/* Pin Category Filter */}
             <div className="flex items-center gap-2">
               <span className="text-slate-500 uppercase text-[10px]">Filter Markers:</span>
@@ -273,8 +206,8 @@ export const VenueArchitecture: React.FC = () => {
             </div>
           </GlassCard>
 
-          {/* Dual Layout: Side-by-Side Architectural Blueprint & AI Heatmap Overlay */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Architectural Blueprint & Pin Markers */}
+          <div className="w-full">
             
             {/* Left: Uploaded Venue Map Blueprint & Pins */}
             <GlassCard className="p-5 space-y-4">
@@ -339,52 +272,6 @@ export const VenueArchitecture: React.FC = () => {
                 )}
               </div>
             </GlassCard>
-
-            {/* Right: AI Heatmap Synchronized Overlay */}
-            <GlassCard className="p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-red-500" />
-                  <span>AI Density Heatmap Layer Overlay</span>
-                </h3>
-                <span className="text-[10px] font-mono text-red-400 font-bold">REAL-TIME INFERENCE</span>
-              </div>
-
-              <div 
-                style={{ aspectRatio: '3 / 2' }}
-                className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center"
-              >
-                {/* Uploaded Base Image */}
-                <img 
-                  src={venueMap.url} 
-                  alt="Venue Map Base" 
-                  style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
-                  className="w-full h-auto object-contain filter contrast-110"
-                />
-
-                {/* Genuine OpenCV Transparent AI Heatmap Overlay Layer */}
-                {venueMap.showHeatmap && heatmapImage ? (
-                  <div 
-                    style={{ opacity: venueMap.opacity / 100 }}
-                    className="absolute inset-0 pointer-events-none transition-opacity duration-300 flex items-center justify-center"
-                  >
-                    <img 
-                      src={heatmapImage.startsWith('data:') ? heatmapImage : `data:image/png;base64,${heatmapImage}`} 
-                      alt="Genuine OpenCV AI Heatmap" 
-                      style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
-                      className="w-full h-auto object-contain filter contrast-125" 
-                    />
-                  </div>
-                ) : venueMap.showHeatmap && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-slate-950/40">
-                    <span className="text-[10px] font-mono text-cyan-400/80 bg-slate-950/80 px-2.5 py-1 rounded border border-cyan-500/20">
-                      OpenCV AI Heatmap Engine Active
-                    </span>
-                  </div>
-                )}
-              </div>
-            </GlassCard>
-
           </div>
 
           {/* Monitored Operational Zones Management Panel */}
@@ -614,7 +501,7 @@ export const VenueArchitecture: React.FC = () => {
           <div className="space-y-2">
             <h2 className="text-xl font-extrabold text-white">No Venue Map Configured</h2>
             <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-              Upload an architectural floorplan, CAD blueprint, or venue layout image for <strong>{currentEventObj.title}</strong> to configure entry gates, security positions, and AI heatmaps.
+              Upload an architectural floorplan, CAD blueprint, or venue layout image for <strong>{currentEventObj.title}</strong> to configure entry gates, security positions, and operational markers.
             </p>
           </div>
 

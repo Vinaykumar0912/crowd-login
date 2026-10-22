@@ -140,7 +140,6 @@ export interface SystemSettings {
   crowdThreshold: number;
   soundAlerts: boolean;
   autoEscalation: boolean;
-  fcaAutoRecommendation: boolean;
   language: string;
   theme: 'dark' | 'light' | 'system';
 }
@@ -192,18 +191,6 @@ export interface InstructionLog {
   readStatus: 'READ' | 'UNREAD';
 }
 
-export interface OfflineJob {
-  id: string;
-  fileName: string;
-  duration: string;
-  resolution: string;
-  fileSize: string;
-  progress: number;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
-  resultSummary: string;
-  timestamp: string;
-}
-
 export interface VenuePin {
   id: string;
   type: 'gate_entry' | 'gate_exit' | 'emergency_exit' | 'security' | 'medical' | 'fire' | 'restricted' | 'camera';
@@ -215,15 +202,27 @@ export interface VenuePin {
 export interface VenueMapConfig {
   url: string;
   opacity: number;
-  showHeatmap: boolean;
   pins: VenuePin[];
+}
+
+export interface OnboardingStatus {
+  has_event: boolean;
+  event: any | null;
+  has_source: boolean;
+  source_count: number;
+  cameras: Camera[];
+  status: 'needs_event' | 'needs_source' | 'complete';
+  next_route: string;
 }
 
 interface CrowdSystemContextType {
   user: AuthUser | null;
   token: string | null;
-  login: (credentials: { email: string; password: string }) => Promise<void>;
+  login: (credentials: { email: string; password: string }) => Promise<OnboardingStatus | null>;
   logout: () => void;
+  onboardingStatus: OnboardingStatus | null;
+  isOnboardingLoading: boolean;
+  checkOnboardingStatus: (eventId?: string) => Promise<OnboardingStatus | null>;
   zones: Zone[];
   fetchZones: (eventId?: string) => Promise<void>;
   fetchCameras: (eventId?: string) => Promise<void>;
@@ -236,7 +235,6 @@ interface CrowdSystemContextType {
   areaSummary: AreaSummary;
   hardwareInfo: HardwareInfo;
   fetchHardwareInfo: () => Promise<void>;
-  fetchOfflineJobs: () => Promise<void>;
   cameras: Camera[];
   alerts: Alert[];
   events: CrowdEvent[];
@@ -249,7 +247,6 @@ interface CrowdSystemContextType {
   aiModules: AIModule[];
   guards: SecurityGuard[];
   instructionLogs: InstructionLog[];
-  offlineJobs: OfflineJob[];
   venueMap: VenueMapConfig;
   selectedEventId: string;
   setSelectedEventId: (id: string) => void;
@@ -277,13 +274,12 @@ interface CrowdSystemContextType {
   addAlert: (alert: Omit<Alert, 'id' | 'timestamp' | 'resolved'>) => Promise<void>;
   resolveAlert: (id: string) => Promise<void>;
   sendInstruction: (instruction: Omit<InstructionLog, 'id' | 'timestamp' | 'deliveryStatus' | 'readStatus'>) => Promise<void>;
-  addOfflineJob: (job: Omit<OfflineJob, 'id' | 'timestamp' | 'progress' | 'status' | 'resultSummary'>) => void;
   updateVenueMap: (config: Partial<VenueMapConfig>) => void;
   uploadVenueMapFile: (file: File) => Promise<void>;
   deleteVenueMapFile: () => Promise<void>;
   addVenuePin: (pin: { type: VenuePin['type']; label: string; x: number; y: number }) => Promise<void>;
   deleteVenuePin: (pinId: string) => Promise<void>;
-  addEvent: (evt: Omit<CrowdEvent, 'id'> & { venue_name?: string }) => Promise<void>;
+  addEvent: (evt: Omit<CrowdEvent, 'id'> & { venue_name?: string }) => Promise<any>;
   updateEvent: (id: string, evt: Partial<CrowdEvent> & { venue_name?: string }) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
   currentTime: string;
@@ -306,37 +302,6 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   });
 
-  const login = async (credentials: { email: string; password: string }) => {
-    const data = await apiService.login(credentials);
-    if (data && data.token) {
-      localStorage.setItem('token', data.token);
-      const userObj = {
-        id: data.id,
-        email: data.email,
-        name: data.name,
-        role: data.role
-      };
-      localStorage.setItem('user', JSON.stringify(userObj));
-      setToken(data.token);
-      setUser(userObj);
-    }
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
-  };
-
-  // Real-time clock tick
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date().toLocaleTimeString());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   // Events State (Database-backed)
   const [events, setEvents] = useState<CrowdEvent[]>([]);
   const [selectedEventId, _setSelectedEventId] = useState<string>(() => {
@@ -355,6 +320,114 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     selectedEventIdRef.current = selectedEventId;
   }, [selectedEventId]);
+
+  // Onboarding status state
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
+  const [isOnboardingLoading, setIsOnboardingLoading] = useState<boolean>(true);
+
+  const checkOnboardingStatus = async (eventId?: string): Promise<OnboardingStatus | null> => {
+    const currentToken = localStorage.getItem('token');
+    if (!currentToken) {
+      setOnboardingStatus(null);
+      setIsOnboardingLoading(false);
+      return null;
+    }
+    try {
+      setIsOnboardingLoading(true);
+      const targetEvtId = eventId || selectedEventId || localStorage.getItem('activeEventId') || localStorage.getItem('selectedEventId') || undefined;
+      const statusData = await apiService.getOnboardingStatus(targetEvtId);
+      if (statusData) {
+        setOnboardingStatus(statusData);
+        if (statusData.event && statusData.event.id) {
+          _setSelectedEventId(statusData.event.id);
+          localStorage.setItem('activeEventId', statusData.event.id);
+          localStorage.setItem('selectedEventId', statusData.event.id);
+        }
+        return statusData;
+      }
+      return null;
+    } catch (err) {
+      console.error('Error checking onboarding status:', err);
+      logout();
+      return null;
+    } finally {
+      setIsOnboardingLoading(false);
+    }
+  };
+
+  const login = async (credentials: { email: string; password: string }): Promise<OnboardingStatus | null> => {
+    setCameras([]);
+    setAlerts([]);
+    setRecommendations([]);
+    setEvents([]);
+    setZones([]);
+    setActiveEmergencyEvent(null);
+    setActiveEmergencyDispatches([]);
+    const data = await apiService.login(credentials);
+    if (data && data.token) {
+      localStorage.setItem('token', data.token);
+      const userObj = {
+        id: data.id,
+        email: data.email,
+        name: data.name,
+        role: data.role
+      };
+      localStorage.setItem('user', JSON.stringify(userObj));
+      setToken(data.token);
+      setUser(userObj);
+      const statusData = await checkOnboardingStatus();
+      return statusData;
+    }
+    return null;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('activeEventId');
+    localStorage.removeItem('selectedEventId');
+    setToken(null);
+    setUser(null);
+    setOnboardingStatus(null);
+    _setSelectedEventId('');
+    setCameras([]);
+    setAlerts([]);
+    setRecommendations([]);
+    setEvents([]);
+    setZones([]);
+    setActiveEmergencyEvent(null);
+    setActiveEmergencyDispatches([]);
+    setVenueMap({
+      url: '',
+      opacity: 65,
+      pins: []
+    });
+    setAreaSummary({
+      totalCount: 0,
+      totalCapacity: 5000,
+      averageDensity: 0,
+      overallRisk: 'low',
+      highRiskZonesCount: 0,
+      activeCamerasCount: 0
+    });
+  };
+
+  // Mount effect to check onboarding status
+  useEffect(() => {
+    if (token) {
+      checkOnboardingStatus();
+    } else {
+      setIsOnboardingLoading(false);
+    }
+  }, [token]);
+
+  // Real-time clock tick
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Zones State (Database-backed)
   const [zones, setZones] = useState<Zone[]>([]);
@@ -399,7 +472,6 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
     crowdThreshold: 85,
     soundAlerts: true,
     autoEscalation: false,
-    fcaAutoRecommendation: false,
     language: 'English',
     theme: 'dark'
   });
@@ -420,25 +492,19 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
     fire: 'none'
   });
 
-  // Offline AI Video Analysis Jobs
-  const [offlineJobs, setOfflineJobs] = useState<OfflineJob[]>([]);
-
   // Venue Architecture Map Config State
   const [venueMap, setVenueMap] = useState<VenueMapConfig>({
     url: '',
     opacity: 65,
-    showHeatmap: true,
     pins: []
   });
 
-  // 10 AI Inference Modules Control State
+  // AI Inference Modules Control State
   const [aiModules, setAiModules] = useState<AIModule[]>([
     { id: 'mod-1', name: 'Human Detection (YOLOv8)', enabled: true, status: 'active', health: 'green', lastUpdated: '10ms ago', description: 'Identifies individual bounding boxes & human figures in video streams.' },
     { id: 'mod-2', name: 'Crowd Counting', enabled: true, status: 'active', health: 'green', lastUpdated: '15ms ago', description: 'Calculates real-time head count per camera frame.' },
     { id: 'mod-3', name: 'Crowd Density Estimation', enabled: true, status: 'active', health: 'green', lastUpdated: '12ms ago', description: 'Computes occupancy density % and flags high-risk bottleneck areas.' },
-    { id: 'mod-4', name: 'Heatmap Generation (OpenCV)', enabled: true, status: 'active', health: 'green', lastUpdated: '30ms ago', description: 'Generates spatial density colormaps over CAD venue blueprints.' },
     { id: 'mod-5', name: 'Crowd Analytics & Velocity', enabled: true, status: 'active', health: 'green', lastUpdated: '25ms ago', description: 'Tracks entry/exit rates and detects turbulence/stagnation vectors.' },
-    { id: 'mod-6', name: 'FCA Galois Analysis Engine', enabled: true, status: 'active', health: 'green', lastUpdated: '40ms ago', description: 'Derives formal context concepts for automated risk reasoning.' },
     { id: 'mod-7', name: 'AI Decision Recommendations', enabled: true, status: 'active', health: 'green', lastUpdated: '50ms ago', description: 'Generates operational dispatch recommendations for control officers.' },
     { id: 'mod-8', name: 'Missing Child Detection', enabled: true, status: 'active', health: 'green', lastUpdated: '20ms ago', description: 'Flags unaccompanied minors separated from adult groups.' },
     { id: 'mod-9', name: 'Emergency Crisis Detection', enabled: true, status: 'active', health: 'green', lastUpdated: '8ms ago', description: 'Triggers alarm overrides on stampede, fire, or panic surges.' },
@@ -480,31 +546,8 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setZones(prev => prev.filter(z => z.id !== zoneId));
   };
 
-  const fetchHardwareInfo = async () => {
-    try {
-      const info = await apiService.getHardwareInfo();
-      if (info) setHardwareInfo(info);
-    } catch (e) {}
-  };
+  const fetchHardwareInfo = async () => {};
 
-  const fetchOfflineJobs = async () => {
-    try {
-      const jobs = await apiService.getOfflineJobs();
-      if (Array.isArray(jobs)) {
-        setOfflineJobs(jobs.map((j: any) => ({
-          id: j.id,
-          fileName: j.filename || j.fileName || 'analysis.mp4',
-          duration: j.duration ? `${j.duration.toFixed(1)}s` : 'Unknown',
-          resolution: j.resolution || '1920x1080',
-          fileSize: j.file_size ? `${(j.file_size / (1024 * 1024)).toFixed(1)} MB` : 'Unknown',
-          progress: j.progress || (j.status === 'completed' ? 100 : 0),
-          status: j.status,
-          resultSummary: j.status === 'completed' ? `Peak: ${j.peak_count}, Avg: ${j.avg_count}` : j.status,
-          timestamp: j.created_at ? new Date(j.created_at).toLocaleTimeString() : 'Recent'
-        })));
-      }
-    } catch (e) {}
-  };
 
   const mapCameraObj = (c: any): Camera => ({
     id: c.id,
@@ -707,15 +750,11 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
           crowdThreshold: s.crowd_threshold,
           soundAlerts: s.sound_alerts,
           autoEscalation: s.auto_escalation,
-          fcaAutoRecommendation: s.fcaAutoRecommendation,
           language: s.language,
           theme: s.theme as any
         });
       }
     }).catch(() => {});
-
-    fetchHardwareInfo();
-    fetchOfflineJobs();
   }, []);
 
   const currentEvent = events.find(e => e.id === selectedEventId)?.title || (events.length > 0 ? events[0].title : 'System Active');
@@ -948,6 +987,7 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const newCam = mapCameraObj(res);
         setCameras(prev => [...prev.filter(c => c.id !== newCam.id), newCam]);
         setActiveCameraId(newCam.id);
+        await checkOnboardingStatus(camera.event_id || selectedEventId);
         return newCam;
       }
     } catch (e) {
@@ -965,6 +1005,7 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const newCam = mapCameraObj(res);
         setCameras(prev => [...prev.filter(c => c.id !== newCam.id), newCam]);
         setActiveCameraId(newCam.id);
+        await checkOnboardingStatus(data?.event_id || selectedEventId);
         return newCam;
       }
     } catch (e) {
@@ -979,6 +1020,7 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const newCam = mapCameraObj(res);
         setCameras(prev => [...prev.filter(c => c.id !== newCam.id), newCam]);
         setActiveCameraId(newCam.id);
+        await checkOnboardingStatus(event_id || selectedEventId);
         return newCam;
       }
     } catch (e) {
@@ -1070,7 +1112,6 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
         crowd_threshold: updated.crowdThreshold,
         sound_alerts: updated.soundAlerts,
         auto_escalation: updated.autoEscalation,
-        fca_auto_recommendation: updated.fcaAutoRecommendation,
         language: updated.language,
         theme: updated.theme
       });
@@ -1130,27 +1171,16 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setInstructionLogs(prev => [log, ...prev]);
   };
 
-  const addOfflineJob = (job: Omit<OfflineJob, 'id' | 'timestamp' | 'progress' | 'status' | 'resultSummary'>) => {
-    const newJob: OfflineJob = {
-      ...job,
-      id: `job-${Date.now()}`,
-      progress: 0,
-      status: 'queued',
-      resultSummary: 'Queued for processing...',
-      timestamp: 'Just now'
-    };
-    setOfflineJobs(prev => [newJob, ...prev]);
-  };
-
   const updateVenueMap = (config: Partial<VenueMapConfig>) => {
     setVenueMap(prev => ({ ...prev, ...config }));
   };
 
   // MySQL Backed Events CRUD
-  const addEvent = async (evt: Omit<CrowdEvent, 'id'>) => {
+  const addEvent = async (evt: Omit<CrowdEvent, 'id'> & { venue_name?: string }) => {
     try {
       const res = await apiService.addEvent({
         title: evt.title,
+        venue_name: evt.venue_name || evt.venueName || 'Main Arena Complex',
         capacity: evt.capacity,
         staff: evt.staff,
         risk: evt.risk,
@@ -1163,6 +1193,7 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const newEvt: CrowdEvent = {
           id: res.id,
           title: res.title,
+          venueName: res.venue_name,
           capacity: res.capacity,
           staff: res.staff,
           risk: res.risk,
@@ -1172,13 +1203,18 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
           assignedCameras: [],
           mapUrl: res.map_url
         };
-        setEvents(prev => [...prev, newEvt]);
+        setEvents(prev => [...prev.filter(e => e.id !== newEvt.id), newEvt]);
         setSelectedEventId(newEvt.id);
-        return;
+        await checkOnboardingStatus(newEvt.id);
+        return newEvt;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error adding event:', e);
+    }
     const fallbackEvt: CrowdEvent = { ...evt, id: `evt-${Date.now()}` };
     setEvents(prev => [...prev, fallbackEvt]);
+    setSelectedEventId(fallbackEvt.id);
+    return fallbackEvt;
   };
 
   const updateEvent = async (id: string, evt: Partial<CrowdEvent>) => {
@@ -1406,6 +1442,9 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
       token,
       login,
       logout,
+      onboardingStatus,
+      isOnboardingLoading,
+      checkOnboardingStatus,
       zones,
       fetchZones,
       fetchCameras,
@@ -1418,7 +1457,6 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
       areaSummary,
       hardwareInfo,
       fetchHardwareInfo,
-      fetchOfflineJobs,
       cameras,
       alerts,
       events,
@@ -1431,7 +1469,6 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
       aiModules,
       guards,
       instructionLogs,
-      offlineJobs,
       venueMap,
       selectedEventId,
       setSelectedEventId,
@@ -1459,7 +1496,6 @@ export const CrowdSystemProvider: React.FC<{ children: React.ReactNode }> = ({ c
       addAlert,
       resolveAlert,
       sendInstruction,
-      addOfflineJob,
       updateVenueMap,
       uploadVenueMapFile,
       deleteVenueMapFile,

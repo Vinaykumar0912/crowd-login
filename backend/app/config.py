@@ -1,6 +1,10 @@
 import os
 from pydantic_settings import BaseSettings
 
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_default_sqlite_path = os.path.join(_backend_dir, "crowd_system.db").replace("\\", "/")
+_default_sqlite_url = f"sqlite:///{_default_sqlite_path}"
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "AI-Based Real-Time Crowd Management & Safety System"
     VERSION: str = "2.4.0"
@@ -14,7 +18,7 @@ class Settings(BaseSettings):
     MYSQL_DB: str = os.getenv("MYSQL_DB", "crowd_db")
     
     MYSQL_DATABASE_URL: str = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
-    SQLITE_DATABASE_URL: str = "sqlite:///./crowd_system.db"
+    SQLITE_DATABASE_URL: str = os.getenv("SQLITE_DATABASE_URL", _default_sqlite_url)
     
     # Computer Vision Settings
     YOLO_MODEL_NAME: str = "yolov8n.pt"  # Ultralytics lightweight model

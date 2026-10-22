@@ -51,13 +51,13 @@ export const DecisionSupport: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 text-cyan-400 text-xs mb-1">
             <Cpu className="w-4 h-4" />
-            <span>FCA INTELLIGENT REASONING ENGINE</span>
+            <span>AI INTELLIGENT DECISION ENGINE</span>
           </div>
           <h2 className="text-2xl font-extrabold tracking-tight text-white">
             AI Decision Support & Action Directives
           </h2>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Formal Concept Analysis (FCA) recommendation engine matches live camera conditions to physical dispatcher rules.
+            Intelligent decision support system matches live camera conditions to physical dispatcher rules.
           </p>
         </div>
 
@@ -152,9 +152,9 @@ export const DecisionSupport: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Math Derivation Basis */}
+                  {/* Derivation Basis */}
                   <div className="p-3 bg-slate-950/80 rounded-lg border border-slate-900 text-[10px] text-slate-400">
-                    <span className="text-[9px] text-cyan-500 font-semibold block uppercase tracking-wider mb-1">FCA Implication Premise:</span>
+                    <span className="text-[9px] text-cyan-500 font-semibold block uppercase tracking-wider mb-1">Decision Premise & Rationale:</span>
                     {rec.reason}
                   </div>
 

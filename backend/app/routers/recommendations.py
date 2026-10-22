@@ -2,31 +2,67 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.database import get_db
-from app.models import CameraModel, AlertModel, RecommendationModel, ZoneModel
-from app.schemas import RecommendationResponse, FCALatticeResponse
+from app.models import CameraModel, AlertModel, RecommendationModel, ZoneModel, EventModel, User
+from app.schemas import RecommendationResponse
 from app.ai.fca_engine import fca_solver
+from app.auth_utils import decode_access_token
 
-router = APIRouter(prefix="/recommendations", tags=["Decision Support & FCA"])
+router = APIRouter(prefix="/recommendations", tags=["Decision Support"])
+security = HTTPBearer(auto_error=False)
+
+def get_current_user_from_auth(auth: Optional[HTTPAuthorizationCredentials], db: Session) -> Optional[User]:
+    if not auth or not auth.credentials:
+        return None
+    try:
+        payload = decode_access_token(auth.credentials)
+        if payload and payload.get("sub"):
+            return db.query(User).filter(User.email == payload["sub"]).first()
+    except Exception:
+        pass
+    return None
 
 @router.get("", response_model=List[RecommendationResponse])
-def get_recommendations(camera_id: Optional[str] = None, event_id: Optional[str] = None, db: Session = Depends(get_db)):
-    """Fetch real FCA decision recommendations derived exclusively from active cameras and alerts."""
+def get_recommendations(
+    camera_id: Optional[str] = None, 
+    event_id: Optional[str] = None, 
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Fetch decision recommendations derived exclusively from active cameras and alerts."""
+    user = get_current_user_from_auth(auth, db)
+    target_event_id = event_id
+
+    if user and event_id:
+        evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot read recommendations for an event owned by another account."
+            )
+    elif not target_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            target_event_id = evt.id
+        else:
+            return []
+
     query = db.query(CameraModel).filter(CameraModel.enabled == True, CameraModel.status == "online")
-    if event_id:
-        query = query.filter(CameraModel.event_id == event_id)
+    if target_event_id:
+        query = query.filter(CameraModel.event_id == target_event_id)
     if camera_id:
         query = query.filter((CameraModel.id == camera_id) | (CameraModel.location == camera_id))
     
     cameras = query.all()
-    if event_id:
-        cam_names = [c.name for c in db.query(CameraModel).filter(CameraModel.event_id == event_id).all()]
-        cam_ids = [c.id for c in db.query(CameraModel).filter(CameraModel.event_id == event_id).all()]
-        zone_names = [z.name for z in db.query(ZoneModel).filter(ZoneModel.event_id == event_id).all()]
-        zone_codes = [z.code for z in db.query(ZoneModel).filter(ZoneModel.event_id == event_id).all() if z.code]
+    if target_event_id:
+        cam_names = [c.name for c in db.query(CameraModel).filter(CameraModel.event_id == target_event_id).all()]
+        cam_ids = [c.id for c in db.query(CameraModel).filter(CameraModel.event_id == target_event_id).all()]
+        zone_names = [z.name for z in db.query(ZoneModel).filter(ZoneModel.event_id == target_event_id).all()]
+        zone_codes = [z.code for z in db.query(ZoneModel).filter(ZoneModel.event_id == target_event_id).all() if z.code]
         all_refs = set(cam_names + cam_ids + zone_names + zone_codes)
         alerts = db.query(AlertModel).filter(AlertModel.resolved == False, (AlertModel.camera.in_(all_refs)) | (AlertModel.zone.in_(all_refs))).all() if all_refs else []
-        zones = db.query(ZoneModel).filter(ZoneModel.event_id == event_id).all()
+        zones = db.query(ZoneModel).filter(ZoneModel.event_id == target_event_id).all()
     else:
         alerts = db.query(AlertModel).filter(AlertModel.resolved == False).all()
         zones = db.query(ZoneModel).all()
@@ -59,59 +95,6 @@ def get_recommendations(camera_id: Optional[str] = None, event_id: Optional[str]
         return db.query(RecommendationModel).filter(RecommendationModel.event_id == event_id).all()
 
     return db.query(RecommendationModel).all()
-
-@router.get("/fca-lattice", response_model=FCALatticeResponse)
-def get_fca_lattice(event_id: Optional[str] = None, db: Session = Depends(get_db)):
-    """
-    Returns dynamically computed Formal Concept Analysis Galois Lattice:
-    - Real Objects G (Active camera zones)
-    - Attributes M (Density, Exits, Intrusions, Surges)
-    - Formal Concepts (Extent, Intent, Formula, Directive)
-    - Lattice DAG connections (Hasse diagram edges)
-    """
-    cam_q = db.query(CameraModel).filter(CameraModel.enabled == True, CameraModel.status == "online")
-    if event_id:
-        cam_q = cam_q.filter(CameraModel.event_id == event_id)
-    cameras = cam_q.all()
-
-    if event_id:
-        zones = db.query(ZoneModel).filter(ZoneModel.event_id == event_id).all()
-        cam_names = [c.name for c in db.query(CameraModel).filter(CameraModel.event_id == event_id).all()]
-        cam_ids = [c.id for c in db.query(CameraModel).filter(CameraModel.event_id == event_id).all()]
-        zone_names = [z.name for z in zones]
-        zone_codes = [z.code for z in zones if z.code]
-        all_refs = set(cam_names + cam_ids + zone_names + zone_codes)
-        alerts = db.query(AlertModel).filter(AlertModel.resolved == False, (AlertModel.camera.in_(all_refs)) | (AlertModel.zone.in_(all_refs))).all() if all_refs else []
-    else:
-        alerts = db.query(AlertModel).filter(AlertModel.resolved == False).all()
-        zones = db.query(ZoneModel).all()
-
-    if not cameras:
-        return {
-            "objects_g": [],
-            "attributes_m": [],
-            "concepts": [],
-            "lattice_edges": [],
-            "timestamp": "Now",
-            "lattice_density": 0.0
-        }
-
-    cam_dicts = [c.__dict__ for c in cameras]
-    alert_dicts = [a.__dict__ for a in alerts]
-    zone_dicts = [z.__dict__ for z in zones]
-
-    objects, relation = fca_solver.build_formal_context(cam_dicts, alert_dicts, zone_dicts)
-    concepts = fca_solver.derive_formal_concepts(objects, relation)
-    nodes, connections = fca_solver.build_lattice_graph(concepts)
-    recs = fca_solver.generate_recommendations_from_fca(concepts, event_id=event_id)
-
-    return {
-        "objects": objects,
-        "attributes": fca_solver.attribute_definitions,
-        "nodes": nodes,
-        "connections": connections,
-        "recommendations": recs
-    }
 
 @router.post("/{rec_id}/approve")
 def approve_recommendation(rec_id: str, db: Session = Depends(get_db)):

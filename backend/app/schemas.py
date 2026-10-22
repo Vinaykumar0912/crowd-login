@@ -114,6 +114,7 @@ class EventCreate(BaseModel):
     end_time: Optional[str] = "08:00 PM"
     limits: Optional[int] = 1000
     map_url: Optional[str] = None
+    manager_id: Optional[int] = None
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
@@ -125,9 +126,11 @@ class EventUpdate(BaseModel):
     end_time: Optional[str] = None
     limits: Optional[int] = None
     map_url: Optional[str] = None
+    manager_id: Optional[int] = None
 
 class EventResponse(EventCreate):
     id: str
+    manager_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -301,12 +304,29 @@ class UserLogin(BaseModel):
     email: str
     password: str
 
+class UserRegister(BaseModel):
+    name: str
+    email: str
+    password: str
+    confirm_password: Optional[str] = None
+    role: Optional[str] = None
+
 class UserResponse(BaseModel):
     id: int
     email: str
     name: str
     role: str
-    token: str
+    token: Optional[str] = None
+    message: Optional[str] = None
+
+class OnboardingStatusResponse(BaseModel):
+    has_event: bool
+    event: Optional[EventResponse] = None
+    has_source: bool
+    source_count: int = 0
+    cameras: List[CameraResponse] = []
+    status: str # "needs_event" | "needs_source" | "complete"
+    next_route: str # "/event-setup" | "/camera-setup" | "/dashboard"
 
 # Offline Video Analysis Job Schemas
 class OfflineJobCreate(BaseModel):

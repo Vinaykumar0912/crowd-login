@@ -56,6 +56,7 @@ class EventModel(Base):
     __tablename__ = "events"
     
     id = Column(String(100), primary_key=True, index=True)
+    manager_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     title = Column(String(255), nullable=False)
     venue_name = Column(String(255), default="Main Venue Complex")
     capacity = Column(Integer, nullable=False)

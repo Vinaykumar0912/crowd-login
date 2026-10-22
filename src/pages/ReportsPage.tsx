@@ -7,7 +7,6 @@ export const ReportsPage: React.FC = () => {
   const { cameras, alerts, selectedEventId } = useCrowdSystem();
   
   const [selectedCamId, setSelectedCamId] = useState<string>('all');
-  const [includeFca, setIncludeFca] = useState(true);
   const [includeCams, setIncludeCams] = useState(true);
   const [includeAlerts, setIncludeAlerts] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -46,7 +45,6 @@ export const ReportsPage: React.FC = () => {
     apiService.downloadPDFReport({
       camId: selectedCamId === 'all' ? undefined : selectedCamId,
       eventId: selectedEventId || undefined,
-      includeFca,
       includeCams,
       includeAlerts
     });
@@ -95,15 +93,6 @@ export const ReportsPage: React.FC = () => {
               Report Sections
             </span>
             <div className="space-y-2 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer text-slate-400 hover:text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={includeFca}
-                  onChange={() => setIncludeFca(!includeFca)}
-                  className="rounded bg-slate-950 border-slate-800 text-cyan-600 focus:ring-cyan-500 w-4 h-4"
-                />
-                <span>Include FCA Concept Lattices</span>
-              </label>
 
               <label className="flex items-center gap-2 cursor-pointer text-slate-400 hover:text-slate-200">
                 <input
@@ -209,23 +198,11 @@ export const ReportsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Section 2: FCA Analysis */}
-          {includeFca && (
-            <div className="space-y-2">
-              <h5 className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider border-b border-slate-800/40 pb-1">
-                2. Formal Concept Galois Derivations
-              </h5>
-              <p className="text-[10px] text-slate-400 leading-normal font-mono">
-                Galois concept lattices compiled for active stream metrics. Identified density state thresholds, generating formal implications for automatic security staff dispatch.
-              </p>
-            </div>
-          )}
-
-          {/* Section 3: Cameras */}
+          {/* Section 2: Cameras */}
           {includeCams && (
             <div className="space-y-2">
               <h5 className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider border-b border-slate-800/40 pb-1">
-                3. Camera Stream Hardware Health
+                2. Camera Stream Hardware Health
               </h5>
               <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
                 {cameras.map(c => (
@@ -240,11 +217,11 @@ export const ReportsPage: React.FC = () => {
             </div>
           )}
 
-          {/* Section 4: Incidents */}
+          {/* Section 3: Incidents */}
           {includeAlerts && (
             <div className="space-y-2">
               <h5 className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider border-b border-slate-800/40 pb-1">
-                4. Incident Warnings & Alert Log
+                3. Incident Warnings & Alert Log
               </h5>
               <p className="text-[10px] text-slate-400 leading-normal font-mono">
                 Total anomalies flagged: {alerts.length} warnings. Critical risk thresholds saved to MySQL database for compliance audits.
@@ -254,7 +231,7 @@ export const ReportsPage: React.FC = () => {
 
           {/* Signature */}
           <div className="pt-6 border-t border-slate-800 flex justify-between items-center text-[9px] text-slate-500 font-mono">
-            <span>Auth Key: FCA-SURV-2026-AUDIT</span>
+            <span>Auth Key: CROWD-SURV-2026-AUDIT</span>
             <span className="flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5 text-green-400" /> Compliance Verified</span>
           </div>
         </div>

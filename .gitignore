@@ -64,3 +64,8 @@ backend/app/uploads/test_detections/
 
 # Unused TorchScript export
 backend/yolov8n.torchscript
+
+# Python and frontend build output
+__pycache__/
+.pytest_cache/
+coverage/

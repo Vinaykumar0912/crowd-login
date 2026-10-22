@@ -184,6 +184,39 @@ export const CameraManagement: React.FC = () => {
         </div>
       </div>
 
+      {/* Diagnostics Panel (Top Placement) */}
+      <div className="cyber-glass p-5 rounded-xl border border-blue-500/10 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded bg-slate-950 border border-slate-900 text-cyan-400">
+            <HardDrive className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-slate-300">GPU Pipeline Load</h4>
+            <p className="text-[10px] text-slate-500 mt-0.5">YOLO inference engine utilizes local GPU compute for active camera workers.</p>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-3 border-t md:border-t-0 md:border-l border-slate-900/60 pt-4 md:pt-0 md:pl-6">
+          <div className="p-2 rounded bg-slate-950 border border-slate-900 text-cyan-400">
+            <Radio className="w-5 h-5 animate-pulse text-cyan-400" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-slate-300">RTSP & Video Sockets Latency</h4>
+            <p className="text-[10px] text-slate-500 mt-0.5">Bounded queue (maxsize=2) maintains ~33ms real-time processing latency.</p>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-3 border-t md:border-t-0 md:border-l border-slate-900/60 pt-4 md:pt-0 md:pl-6">
+          <div className="p-2 rounded bg-slate-950 border border-slate-900 text-cyan-400">
+            <RefreshCw className="w-5 h-5 animate-spin" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-slate-300">MySQL Database Storage</h4>
+            <p className="text-[10px] text-slate-500 mt-0.5">Crowd analytics snapshots continuously saved to MySQL `crowd_analytics` table.</p>
+          </div>
+        </div>
+      </div>
+
       {/* Info Banner */}
       <div className="p-3.5 rounded-xl bg-cyan-950/40 border border-cyan-500/20 flex items-center justify-between text-xs">
         <div className="flex items-center gap-2 text-cyan-400">
@@ -580,39 +613,6 @@ export const CameraManagement: React.FC = () => {
           })}
         </div>
       )}
-
-      {/* Diagnostics Panel */}
-      <div className="cyber-glass p-5 rounded-xl border border-blue-500/10 grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="flex items-start gap-3">
-          <div className="p-2 rounded bg-slate-950 border border-slate-900 text-cyan-400">
-            <HardDrive className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-xs font-bold uppercase text-slate-300">GPU Pipeline Load</h4>
-            <p className="text-[10px] text-slate-500 mt-0.5">YOLO inference engine utilizes local GPU compute for active camera workers.</p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 border-t md:border-t-0 md:border-l border-slate-900/60 pt-4 md:pt-0 md:pl-6">
-          <div className="p-2 rounded bg-slate-950 border border-slate-900 text-cyan-400">
-            <Radio className="w-5 h-5 animate-pulse text-cyan-400" />
-          </div>
-          <div>
-            <h4 className="text-xs font-bold uppercase text-slate-300">RTSP & Video Sockets Latency</h4>
-            <p className="text-[10px] text-slate-500 mt-0.5">Bounded queue (maxsize=2) maintains ~33ms real-time processing latency.</p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 border-t md:border-t-0 md:border-l border-slate-900/60 pt-4 md:pt-0 md:pl-6">
-          <div className="p-2 rounded bg-slate-950 border border-slate-900 text-cyan-400">
-            <RefreshCw className="w-5 h-5 animate-spin" />
-          </div>
-          <div>
-            <h4 className="text-xs font-bold uppercase text-slate-300">MySQL Database Storage</h4>
-            <p className="text-[10px] text-slate-500 mt-0.5">Crowd analytics snapshots continuously saved to MySQL `crowd_analytics` table.</p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

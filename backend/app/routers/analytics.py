@@ -1,23 +1,65 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Optional
 
 from app.database import get_db
-from app.models import CameraModel, AlertModel, CrowdAnalyticsModel
+from app.models import CameraModel, AlertModel, CrowdAnalyticsModel, EventModel, User
 from app.schemas import LiveStatusResponse
 from app.ai.risk_engine import risk_engine
+from app.auth_utils import decode_access_token
 
 router = APIRouter(prefix="", tags=["Analytics & Status"])
+security = HTTPBearer(auto_error=False)
+
+def get_current_user_from_auth(auth: Optional[HTTPAuthorizationCredentials], db: Session) -> Optional[User]:
+    if not auth or not auth.credentials:
+        return None
+    try:
+        payload = decode_access_token(auth.credentials)
+        if payload and payload.get("sub"):
+            return db.query(User).filter(User.email == payload["sub"]).first()
+    except Exception:
+        pass
+    return None
 
 @router.get("/live-status", response_model=LiveStatusResponse)
-def get_live_status(event_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+def get_live_status(
+    event_id: Optional[str] = Query(None),
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user_from_auth(auth, db)
+    target_event_id = event_id
+
+    if user and event_id:
+        evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot read live status for an event owned by another account."
+            )
+    elif not target_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            target_event_id = evt.id
+        else:
+            return {
+                "system_status": "IDLE",
+                "active_cameras": 0,
+                "total_count": 0,
+                "average_density": 0.0,
+                "system_risk_level": "0% LOW",
+                "timestamp": datetime.now().strftime("%H:%M:%S")
+            }
+
     cam_query = db.query(CameraModel)
-    if event_id:
-        cam_query = cam_query.filter(CameraModel.event_id == event_id)
+    if target_event_id:
+        cam_query = cam_query.filter(CameraModel.event_id == target_event_id)
     cameras = cam_query.all()
 
-    if event_id:
+    if target_event_id:
         cam_names = [c.name for c in cameras]
         cam_ids = [c.id for c in cameras]
         all_refs = set(cam_names + cam_ids)
@@ -48,8 +90,37 @@ def get_live_status(event_id: Optional[str] = Query(None), db: Session = Depends
     }
 
 @router.get("/crowd-analysis")
-def get_crowd_analysis(camera_id: Optional[str] = Query(None), event_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+def get_crowd_analysis(
+    camera_id: Optional[str] = Query(None),
+    event_id: Optional[str] = Query(None),
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
     """Fetch real crowd analytics query from MySQL crowd_analytics table without artificial multipliers."""
+    user = get_current_user_from_auth(auth, db)
+    target_event_id = event_id
+
+    if user and event_id:
+        evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+        if evt and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot read crowd analysis for an event owned by another account."
+            )
+    elif not target_event_id and user:
+        evt = db.query(EventModel).filter(EventModel.manager_id == user.id).first()
+        if evt:
+            target_event_id = evt.id
+        else:
+            return {
+                "total_count": 0,
+                "entry_rate_per_min": None,
+                "exit_rate_per_min": None,
+                "average_walking_speed_ms": 0.0,
+                "flow_turbulence": 0.0,
+                "speed_status": "Speed unavailable — no active event configured",
+                "hourly_trend": [0] * 12
+            }
     if camera_id and event_id:
         cam = db.query(CameraModel).filter(CameraModel.id == camera_id).first()
         if cam and cam.event_id != event_id:
@@ -68,7 +139,7 @@ def get_crowd_analysis(camera_id: Optional[str] = Query(None), event_id: Optiona
         query = query.filter(CameraModel.event_id == event_id)
     if camera_id:
         query = query.filter(CameraModel.id == camera_id)
-    
+
     active_cams = query.all()
 
     # Query actual historical analytics rows from crowd_analytics table
@@ -77,7 +148,7 @@ def get_crowd_analysis(camera_id: Optional[str] = Query(None), event_id: Optiona
         analytics_query = analytics_query.filter(CrowdAnalyticsModel.event_id == event_id)
     if camera_id:
         analytics_query = analytics_query.filter(CrowdAnalyticsModel.camera_id == camera_id)
-    
+
     rows = analytics_query.order_by(CrowdAnalyticsModel.timestamp.desc()).limit(100).all()
 
     if not active_cams and not rows:
@@ -92,7 +163,7 @@ def get_crowd_analysis(camera_id: Optional[str] = Query(None), event_id: Optiona
         }
 
     total_count = active_cams[0].count if active_cams else (rows[0].count if rows else 0)
-    
+
     speeds = [r.speed_avg for r in rows if r.speed_avg is not None and r.speed_avg > 0]
     avg_speed = round(sum(speeds) / len(speeds), 1) if speeds else 0.0
 
