@@ -184,6 +184,39 @@ def migrate_database():
         except Exception as e:
             print(f"[MIGRATION][NOTICE] Exhibition Hall zone seeding: {e}")
 
+        # Ensure zone_connections table exists and default connections seeded
+        try:
+            import app.models  # ensure models are registered
+            from app.database import Base
+            Base.metadata.create_all(bind=engine)
+            
+            # Seed connections for events with zones if no connections exist
+            events_with_zones = conn.execute(text("SELECT DISTINCT event_id FROM zones")).fetchall()
+            for row in events_with_zones:
+                eid = row[0]
+                conn_count = conn.execute(text(f"SELECT COUNT(*) FROM zone_connections WHERE event_id = '{eid}'")).scalar()
+                if conn_count == 0:
+                    z_rows = conn.execute(text(f"SELECT id FROM zones WHERE event_id = '{eid}' ORDER BY id ASC")).fetchall()
+                    z_ids = [z[0] for z in z_rows]
+                    if len(z_ids) >= 2:
+                        # Connect consecutive zones in topology (e.g. Zone 1 <-> Zone 2 <-> Zone 3)
+                        for idx in range(len(z_ids) - 1):
+                            c_id = f"conn-{eid}-{idx+1}"
+                            conn.execute(text(f"""
+                                INSERT INTO zone_connections (id, event_id, from_zone_id, to_zone_id, bidirectional, is_blocked, corridor_name, flow_capacity)
+                                VALUES ('{c_id}', '{eid}', '{z_ids[idx]}', '{z_ids[idx+1]}', 1, 0, 'Passage {idx+1}', 500)
+                            """))
+                        # Also if 4 zones, connect Zone 2 to Zone 4
+                        if len(z_ids) >= 4:
+                            c_id_aux = f"conn-{eid}-aux"
+                            conn.execute(text(f"""
+                                INSERT INTO zone_connections (id, event_id, from_zone_id, to_zone_id, bidirectional, is_blocked, corridor_name, flow_capacity)
+                                VALUES ('{c_id_aux}', '{eid}', '{z_ids[1]}', '{z_ids[3]}', 1, 0, 'Auxiliary Corridor', 400)
+                            """))
+                        conn.commit()
+                        print(f"[MIGRATION][SUCCESS] Seeded physical zone connectivity for event '{eid}'.")
+        except Exception as e:
+            print(f"[MIGRATION][NOTICE] Zone connections table check / seed: {e}")
 
     print("[MIGRATION] Database schema synchronization complete. Existing data preserved.\n")
 

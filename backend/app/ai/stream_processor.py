@@ -46,6 +46,16 @@ class CameraStreamWorker:
         self.last_risk = "LOW"
         self.last_flow_rate = 0.0
         self.last_speed_avg = 0.0
+        self.flow_metrics = {
+            "X_neg": 0.0,
+            "X_pos": 0.0,
+            "Y_neg": 0.0,
+            "Y_pos": 0.0,
+            "lambda_out": 0.0,
+            "avg_speed_mps": 0.0
+        }
+        self.unique_window_count = 0
+        self.cumulative_count = 0
         self.prev_centroids: List[tuple] = []
         self.latest_boxes: List = []
         self.active_tracks: List = []
@@ -258,17 +268,13 @@ class CameraStreamWorker:
             else:
                 new_proc_fps = round(0.8 * self.processing_fps + 0.2 * instant_fps, 1)
 
-            # 5. Centroids for flow calculation
+            # 5. Flow and Motion Vector Calculation (IEEE Access 2025, Eqs 2-5)
             curr_centroids = [((b[0] + b[2]) // 2, (b[1] + b[3]) // 2) for b in boxes]
-            if self.prev_centroids and curr_centroids:
-                displacements = []
-                for cx, cy in curr_centroids:
-                    min_dist = min([math.hypot(cx - px, cy - py) for px, py in self.prev_centroids])
-                    if min_dist < 100:
-                        displacements.append(min_dist)
-                flow_rate = round(float(len(displacements) * 0.5), 1) if displacements else 0.0
-            else:
-                flow_rate = 0.0
+            flow_metrics = self.tracker.compute_flow_metrics()
+            flow_rate = flow_metrics.get("lambda_out", 0.0)
+            speed_avg = flow_metrics.get("avg_speed_mps", 0.0)
+            unique_window = self.tracker.get_unique_window_count(30.0)
+            cumulative_cnt = self.tracker.cumulative_unique_count
 
             # 6. Thread-safe state update
             with self.state_lock:
@@ -280,6 +286,10 @@ class CameraStreamWorker:
                 self.processing_fps = new_proc_fps
                 self.prev_centroids = curr_centroids
                 self.last_flow_rate = flow_rate
+                self.last_speed_avg = speed_avg
+                self.flow_metrics = flow_metrics
+                self.unique_window_count = unique_window
+                self.cumulative_count = cumulative_cnt
                 self.last_detection_frame_seq = infer_seq
 
             # Accumulate spatial points into global heatmap

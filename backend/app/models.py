@@ -244,3 +244,19 @@ class OfflineAnalysisJobModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
+class ZoneConnectionModel(Base):
+    """
+    Physical area connectivity graph edge representing actual passages/corridors
+    between zones (Al-Oraiqat et al., IEEE Access 2025, Definitions 4 & 6).
+    """
+    __tablename__ = "zone_connections"
+    
+    id = Column(String(100), primary_key=True, index=True)
+    event_id = Column(String(100), ForeignKey("events.id", ondelete="CASCADE"), index=True, nullable=False)
+    from_zone_id = Column(String(100), ForeignKey("zones.id", ondelete="CASCADE"), nullable=False)
+    to_zone_id = Column(String(100), ForeignKey("zones.id", ondelete="CASCADE"), nullable=False)
+    bidirectional = Column(Boolean, default=True)
+    is_blocked = Column(Boolean, default=False)
+    corridor_name = Column(String(255), nullable=True)
+    flow_capacity = Column(Integer, default=500)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -7,14 +7,17 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.database import get_db
-from app.models import EventModel, VenuePinModel, ZoneModel, CameraModel, SecurityStaffModel, User
+from app.models import EventModel, VenuePinModel, ZoneModel, CameraModel, SecurityStaffModel, User, ZoneConnectionModel
 from app.schemas import (
     VenueDetailsResponse, 
     VenuePinCreate, 
     VenuePinResponse,
     ZoneCreate,
     ZoneUpdate,
-    ZoneResponse
+    ZoneResponse,
+    ZoneConnectionCreate,
+    ZoneConnectionUpdate,
+    ZoneConnectionResponse
 )
 from app.auth_utils import decode_access_token
 
@@ -124,6 +127,7 @@ def _build_venue_response(evt: EventModel, db: Session) -> dict:
     zones = db.query(ZoneModel).filter(ZoneModel.event_id == evt.id).all()
     cams = db.query(CameraModel).filter(CameraModel.event_id == evt.id).all()
     staff = db.query(SecurityStaffModel).all()
+    connections = db.query(ZoneConnectionModel).filter(ZoneConnectionModel.event_id == evt.id).all()
 
     # Spatial architecture breakdown
     gates = [p for p in pins if p.pin_type in ["gate_entry", "gate_exit"]]
@@ -162,7 +166,8 @@ def _build_venue_response(evt: EventModel, db: Session) -> dict:
         "emergency_exits": emg_exits,
         "restricted_areas": restricted,
         "camera_locations": cam_locations,
-        "security_resources": security_res
+        "security_resources": security_res,
+        "connections": connections
     }
 
     return {
@@ -172,6 +177,7 @@ def _build_venue_response(evt: EventModel, db: Session) -> dict:
         "map_url": evt.map_url,
         "pins": pins,
         "zones": zones,
+        "connections": connections,
         "spatial_architecture": spatial_arch
     }
 
@@ -431,3 +437,119 @@ def delete_event_zone(
     db.delete(zone)
     db.commit()
     return {"message": "Zone deleted successfully", "id": zone_id}
+
+# --- ZONE CONNECTION CRUD ENDPOINTS (Paper Definition 4: Physical Area Graph) ---
+@router.get("/{event_id}/connections", response_model=List[ZoneConnectionResponse])
+def get_event_connections(
+    event_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first() if event_id != "default" else db.query(EventModel).first()
+    if not evt:
+        return []
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot read connections for an event owned by another account."
+        )
+    return db.query(ZoneConnectionModel).filter(ZoneConnectionModel.event_id == evt.id).all()
+
+@router.post("/{event_id}/connections", response_model=ZoneConnectionResponse, status_code=status.HTTP_201_CREATED)
+def create_zone_connection(
+    event_id: str,
+    conn_data: ZoneConnectionCreate,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+    if not evt:
+        raise HTTPException(status_code=404, detail="Event not found")
+    user = get_current_user_from_auth(auth, db)
+    if user and evt.manager_id and evt.manager_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You cannot create connections for an event owned by another account."
+        )
+
+    # Validate zones exist
+    from_z = db.query(ZoneModel).filter(ZoneModel.id == conn_data.from_zone_id, ZoneModel.event_id == evt.id).first()
+    to_z = db.query(ZoneModel).filter(ZoneModel.id == conn_data.to_zone_id, ZoneModel.event_id == evt.id).first()
+    if not from_z or not to_z:
+        raise HTTPException(status_code=400, detail="One or both connected zones do not exist for this event.")
+
+    conn_id = f"conn-{evt.id}-{int(time.time() * 1000)}"
+    new_conn = ZoneConnectionModel(
+        id=conn_id,
+        event_id=evt.id,
+        from_zone_id=conn_data.from_zone_id,
+        to_zone_id=conn_data.to_zone_id,
+        bidirectional=conn_data.bidirectional if conn_data.bidirectional is not None else True,
+        is_blocked=conn_data.is_blocked or False,
+        corridor_name=conn_data.corridor_name or f"Passage {from_z.name} -> {to_z.name}",
+        flow_capacity=conn_data.flow_capacity or 500
+    )
+    db.add(new_conn)
+    db.commit()
+    db.refresh(new_conn)
+    return new_conn
+
+@router.put("/{event_id}/connections/{connection_id}", response_model=ZoneConnectionResponse)
+def update_zone_connection(
+    event_id: str,
+    connection_id: str,
+    conn_data: ZoneConnectionUpdate,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    conn = db.query(ZoneConnectionModel).filter(ZoneConnectionModel.id == connection_id, ZoneConnectionModel.event_id == event_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Zone connection not found")
+
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+    if evt:
+        user = get_current_user_from_auth(auth, db)
+        if user and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot modify connections for an event owned by another account."
+            )
+
+    if conn_data.bidirectional is not None:
+        conn.bidirectional = conn_data.bidirectional
+    if conn_data.is_blocked is not None:
+        conn.is_blocked = conn_data.is_blocked
+    if conn_data.corridor_name is not None:
+        conn.corridor_name = conn_data.corridor_name
+    if conn_data.flow_capacity is not None:
+        conn.flow_capacity = conn_data.flow_capacity
+
+    db.commit()
+    db.refresh(conn)
+    return conn
+
+@router.delete("/{event_id}/connections/{connection_id}")
+def delete_zone_connection(
+    event_id: str,
+    connection_id: str,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    conn = db.query(ZoneConnectionModel).filter(ZoneConnectionModel.id == connection_id, ZoneConnectionModel.event_id == event_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Zone connection not found")
+
+    evt = db.query(EventModel).filter(EventModel.id == event_id).first()
+    if evt:
+        user = get_current_user_from_auth(auth, db)
+        if user and evt.manager_id and evt.manager_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot delete connections for an event owned by another account."
+            )
+
+    db.delete(conn)
+    db.commit()
+    return {"message": "Zone connection deleted successfully", "id": connection_id}
+

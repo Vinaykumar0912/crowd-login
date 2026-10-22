@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models import CameraModel, AlertModel, CrowdAnalyticsModel, EventModel, User
 from app.schemas import LiveStatusResponse
 from app.ai.risk_engine import risk_engine
+from app.ai.stream_processor import stream_manager
 from app.auth_utils import decode_access_token
 
 router = APIRouter(prefix="", tags=["Analytics & Status"])
@@ -159,6 +160,11 @@ def get_crowd_analysis(
             "average_walking_speed_ms": 0.0,
             "speed_status": "Speed unavailable — camera calibration required",
             "stagnation_points": [],
+            "flow_decomposition": {
+                "X_neg": 0.0, "X_pos": 0.0, "Y_neg": 0.0, "Y_pos": 0.0, "lambda_out": 0.0, "avg_speed_mps": 0.0
+            },
+            "unique_tracked_window": 0,
+            "cumulative_entries": 0,
             "hourly_trend": []
         }
 
@@ -183,6 +189,21 @@ def get_crowd_analysis(
     entry_rate = None
     exit_rate = None
 
+    active_worker = None
+    if camera_id and camera_id in stream_manager.workers:
+        active_worker = stream_manager.workers[camera_id]
+    elif active_cams:
+        for c in active_cams:
+            if c.id in stream_manager.workers:
+                active_worker = stream_manager.workers[c.id]
+                break
+
+    flow_metrics = active_worker.flow_metrics if active_worker else {
+        "X_neg": 0.0, "X_pos": 0.0, "Y_neg": 0.0, "Y_pos": 0.0, "lambda_out": 0.0, "avg_speed_mps": avg_speed
+    }
+    unique_window = active_worker.unique_window_count if active_worker else total_count
+    cumulative_cnt = active_worker.cumulative_count if active_worker else total_count
+
     return {
         "total_count": total_count,
         "entry_rate_per_min": entry_rate,
@@ -190,5 +211,8 @@ def get_crowd_analysis(
         "average_walking_speed_ms": avg_speed,
         "speed_status": "Speed unavailable — camera calibration required" if avg_speed == 0.0 else "Calibrated",
         "stagnation_points": [c.location for c in active_cams if (c.density or 0) > 75.0],
+        "flow_decomposition": flow_metrics,
+        "unique_tracked_window": unique_window,
+        "cumulative_entries": cumulative_cnt,
         "hourly_trend": hourly_trend
     }

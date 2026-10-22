@@ -149,6 +149,32 @@ class VenuePinResponse(VenuePinCreate):
     class Config:
         from_attributes = True
 
+# Zone Connection Schemas (Al-Oraiqat et al., IEEE Access 2025, Definition 4 & 6)
+class ZoneConnectionBase(BaseModel):
+    from_zone_id: str
+    to_zone_id: str
+    bidirectional: Optional[bool] = True
+    is_blocked: Optional[bool] = False
+    corridor_name: Optional[str] = None
+    flow_capacity: Optional[int] = 500
+
+class ZoneConnectionCreate(ZoneConnectionBase):
+    pass
+
+class ZoneConnectionUpdate(BaseModel):
+    bidirectional: Optional[bool] = None
+    is_blocked: Optional[bool] = None
+    corridor_name: Optional[str] = None
+    flow_capacity: Optional[int] = None
+
+class ZoneConnectionResponse(ZoneConnectionBase):
+    id: str
+    event_id: str
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
 class SpatialHierarchySummary(BaseModel):
     gates: List[VenuePinResponse] = []
     entrances: List[VenuePinResponse] = []
@@ -157,6 +183,7 @@ class SpatialHierarchySummary(BaseModel):
     restricted_areas: List[VenuePinResponse] = []
     camera_locations: List[dict] = []
     security_resources: List[dict] = []
+    connections: List[ZoneConnectionResponse] = []
 
 class VenueDetailsResponse(BaseModel):
     event_id: str
@@ -165,6 +192,7 @@ class VenueDetailsResponse(BaseModel):
     map_url: Optional[str] = None
     pins: List[VenuePinResponse] = []
     zones: List[ZoneResponse] = []
+    connections: List[ZoneConnectionResponse] = []
     spatial_architecture: Optional[SpatialHierarchySummary] = None
 
 # Recommendation & FCA Schemas
@@ -380,4 +408,43 @@ class FCALatticeResponse(BaseModel):
     nodes: List[FCANode]
     connections: List[FCALink]
     recommendations: List[RecommendationResponse]
+
+# Base Paper IEEE Access 2025: Research Models
+class CrowdedAreaResult(BaseModel):
+    area: str
+    crowd_score: float
+    concept_id: str
+    satisfied_intent: List[str]
+    attribute_scores: dict
+    is_crowded: bool
+    reason: str
+
+class PreventionPlanItem(BaseModel):
+    plan_id: str
+    crowded_sources: List[str]
+    recommended_destinations: List[str]
+    concept_id: str
+    concept_extent: List[str]
+    concept_intent: List[str]
+    status: str = "pending_human_approval"
+    mitigation_capacity: int = 0
+    reason: str
+    is_verified_evacuation: bool = False
+    warning: Optional[str] = None
+
+class PreventionPlanResponse(BaseModel):
+    event_id: Optional[str] = None
+    total_crowded_areas: int
+    resolved_count: int
+    unresolved_areas: List[str] = []
+    plans: List[PreventionPlanItem] = []
+    timestamp: str
+
+class ResearchLatticeResponse(BaseModel):
+    event_id: Optional[str] = None
+    crowd_lattice: FCALatticeResponse
+    area_lattice: FCALatticeResponse
+    fuzzy_context_summary: dict
+    crowded_areas: List[CrowdedAreaResult] = []
+    prevention_plans: List[PreventionPlanItem] = []
 

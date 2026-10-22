@@ -192,6 +192,21 @@ export const apiService = {
     const res = await fetch(`${API_BASE_URL}/recommendations${query}`);
     return await res.json();
   },
+  getFCAResearchLattice: async (eventId?: string) => {
+    const query = eventId ? `?event_id=${eventId}` : '';
+    const res = await fetch(`${API_BASE_URL}/recommendations/fca-lattice${query}`);
+    return await res.json();
+  },
+  getCrowdedAreas: async (eventId?: string) => {
+    const query = eventId ? `?event_id=${eventId}` : '';
+    const res = await fetch(`${API_BASE_URL}/recommendations/crowded-areas${query}`);
+    return await res.json();
+  },
+  getPreventionPlans: async (eventId?: string) => {
+    const query = eventId ? `?event_id=${eventId}` : '';
+    const res = await fetch(`${API_BASE_URL}/recommendations/prevention-plans${query}`);
+    return await res.json();
+  },
   approveRecommendation: async (recId: string) => {
     const res = await fetch(`${API_BASE_URL}/recommendations/${recId}/approve`, { method: 'POST' });
     return await res.json();
@@ -206,6 +221,32 @@ export const apiService = {
   },
   dismissRecommendation: async (recId: string) => {
     const res = await fetch(`${API_BASE_URL}/recommendations/${recId}/dismiss`, { method: 'POST' });
+    return await res.json();
+  },
+  getZoneConnections: async (eventId: string) => {
+    const res = await fetch(`${API_BASE_URL}/events/${eventId}/connections`);
+    return await res.json();
+  },
+  createZoneConnection: async (eventId: string, data: any) => {
+    const res = await fetch(`${API_BASE_URL}/events/${eventId}/connections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  },
+  updateZoneConnection: async (eventId: string, connId: string, data: any) => {
+    const res = await fetch(`${API_BASE_URL}/events/${eventId}/connections/${connId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  },
+  deleteZoneConnection: async (eventId: string, connId: string) => {
+    const res = await fetch(`${API_BASE_URL}/events/${eventId}/connections/${connId}`, {
+      method: 'DELETE'
+    });
     return await res.json();
   },
 

@@ -4,7 +4,7 @@ import logging
 import time
 import math
 import threading
-from typing import Optional, List, Tuple, Any
+from typing import Optional, List, Tuple, Any, Dict
 
 logger = logging.getLogger("uvicorn")
 
@@ -38,13 +38,25 @@ class TemporalPersonTracker:
     strictly bounded to MAX_PREDICTION_FRAMES (6 frames / ~250ms at 24 FPS).
     Ensures stale bounding boxes are never retained.
     """
-    def __init__(self, max_prediction_frames: int = MAX_PREDICTION_FRAMES, max_distance: float = 120.0):
+    def __init__(self, max_prediction_frames: int = MAX_PREDICTION_FRAMES, max_distance: float = 120.0, meters_per_pixel: float = 0.04, fps: float = 30.0):
         self.next_object_id = 1
         self.tracks = {}
         self.max_prediction_frames = max_prediction_frames
         self.max_distance = max_distance
+        self.meters_per_pixel = meters_per_pixel
+        self.fps = fps
         self.prev_gray = None
         self.current_seq = 0
+        self.seen_ids_window: Dict[int, float] = {}  # {track_id: timestamp}
+        self.cumulative_unique_count = 0
+        self.last_flow_metrics = {
+            "X_neg": 0.0,
+            "X_pos": 0.0,
+            "Y_neg": 0.0,
+            "Y_pos": 0.0,
+            "lambda_out": 0.0,
+            "avg_speed_mps": 0.0
+        }
         self.lock = threading.Lock()
 
     def reset(self):
@@ -52,6 +64,15 @@ class TemporalPersonTracker:
             self.tracks.clear()
             self.prev_gray = None
             self.current_seq = 0
+            self.seen_ids_window.clear()
+            self.last_flow_metrics = {
+                "X_neg": 0.0,
+                "X_pos": 0.0,
+                "Y_neg": 0.0,
+                "Y_pos": 0.0,
+                "lambda_out": 0.0,
+                "avg_speed_mps": 0.0
+            }
 
     def update_detections(self, detections: list, det_seq: int, det_time: float):
         """
@@ -64,6 +85,8 @@ class TemporalPersonTracker:
                 for b in detections:
                     tid = self.next_object_id
                     self.next_object_id += 1
+                    self.cumulative_unique_count += 1
+                    self.seen_ids_window[tid] = det_time
                     self.tracks[tid] = Track(tid, b[:4], b[4], ref_seq, det_time)
                 return
 
@@ -137,6 +160,8 @@ class TemporalPersonTracker:
                 det = detections[c]
                 tid = self.next_object_id
                 self.next_object_id += 1
+                self.cumulative_unique_count += 1
+                self.seen_ids_window[tid] = det_time
                 self.tracks[tid] = Track(tid, det[:4], det[4], ref_seq, det_time)
 
     def track_frame(self, frame: np.ndarray, curr_seq: int, curr_time: float) -> list:
@@ -211,6 +236,80 @@ class TemporalPersonTracker:
                         del self.tracks[tid]
 
             return active_boxes
+
+    def get_unique_window_count(self, window_seconds: float = 30.0, current_time: Optional[float] = None) -> int:
+        """
+        Returns number of unique tracked person IDs observed within a sliding time window (default 30s).
+        Prevents double-counting and memory accumulation.
+        """
+        with self.lock:
+            now_t = current_time if current_time is not None else time.time()
+            cutoff = now_t - window_seconds
+            # Purge expired track IDs older than sliding window
+            self.seen_ids_window = {
+                tid: ts for tid, ts in self.seen_ids_window.items() if ts >= cutoff
+            }
+            return len(self.seen_ids_window)
+
+    def compute_flow_metrics(self) -> Dict[str, float]:
+        """
+        Computes motion and flow metrics according to IEEE Access 2025 (Section VI-B, VI-C):
+        - Equations (2): Horizontal flow components X^-, X^+
+        - Equations (3): Vertical flow components Y^-, Y^+
+        - Equation (4): Total rate of decrease / outflow lambda_out = X^+ + X^- + Y^+ + Y^-
+        - Physical velocity (meters/second) via perspective meters_per_pixel scaling
+        """
+        with self.lock:
+            if not self.tracks:
+                return {
+                    "X_neg": 0.0,
+                    "X_pos": 0.0,
+                    "Y_neg": 0.0,
+                    "Y_pos": 0.0,
+                    "lambda_out": 0.0,
+                    "avg_speed_mps": 0.0,
+                    "active_track_count": 0
+                }
+
+            vx_list = [t.vx for t in self.tracks.values()]
+            vy_list = [t.vy for t in self.tracks.values()]
+
+            # Horizontal Flow Components (Eq 2)
+            abs_vx_sum = sum(abs(v) for v in vx_list)
+            if abs_vx_sum > 1e-4:
+                x_neg = sum(-v for v in vx_list if v < 0) / abs_vx_sum
+                x_pos = sum(v for v in vx_list if v > 0) / abs_vx_sum
+            else:
+                x_neg, x_pos = 0.0, 0.0
+
+            # Vertical Flow Components (Eq 3)
+            abs_vy_sum = sum(abs(v) for v in vy_list)
+            if abs_vy_sum > 1e-4:
+                y_neg = sum(-v for v in vy_list if v < 0) / abs_vy_sum
+                y_pos = sum(v for v in vy_list if v > 0) / abs_vy_sum
+            else:
+                y_neg, y_pos = 0.0, 0.0
+
+            # Outflow Rate (Eq 4)
+            lambda_out = round(x_pos + x_neg + y_pos + y_neg, 3)
+
+            # Calibrated physical speed in meters/second
+            speeds_px_per_frame = [math.hypot(vx, vy) for vx, vy in zip(vx_list, vy_list)]
+            avg_px_speed = sum(speeds_px_per_frame) / max(1, len(speeds_px_per_frame))
+            # v_phys = avg_px_speed * meters_per_pixel * fps
+            avg_speed_mps = round(avg_px_speed * self.meters_per_pixel * self.fps, 2)
+
+            metrics = {
+                "X_neg": round(x_neg, 3),
+                "X_pos": round(x_pos, 3),
+                "Y_neg": round(y_neg, 3),
+                "Y_pos": round(y_pos, 3),
+                "lambda_out": lambda_out,
+                "avg_speed_mps": avg_speed_mps,
+                "active_track_count": len(self.tracks)
+            }
+            self.last_flow_metrics = metrics
+            return metrics
 
     # Backward compatibility fallback
     def update(self, rects):
